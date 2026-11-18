@@ -61,8 +61,13 @@ def get_cookie_args(temp_dir: Optional[Path] = None) -> List[str]:
 
 
 def get_openrouter_api_key() -> Optional[str]:
-    """Retrieve OPENROUTER_API_KEY from environment."""
-    return os.getenv("OPENROUTER_API_KEY", "").strip() or None
+    """Retrieve OPENROUTER_API_KEY from environment, with automatic fallback to .env/.env.example."""
+    key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not key:
+        from gta6_clipper.moments import ensure_dotenv_loaded
+        ensure_dotenv_loaded()
+        key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    return key or None
 
 
 def get_openrouter_model() -> str:

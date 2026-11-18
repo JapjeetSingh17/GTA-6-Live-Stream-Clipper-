@@ -23,9 +23,32 @@ DEFAULT_OVERLAP_SECONDS = 30.0
 DEFAULT_DELAY_SECONDS = 5.0
 DEFAULT_MAX_MOMENTS = 10
 
+def ensure_dotenv_loaded():
+    """Ensure environment variables from .env or .env.example are loaded into os.environ."""
+    for base in (Path.cwd(), Path(__file__).resolve().parent.parent):
+        for candidate in (base / ".env", base / ".env.example"):
+            if candidate.exists():
+                try:
+                    for line in candidate.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k, v = k.strip(), v.strip().strip("'\"")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+                except Exception:
+                    pass
+
+ensure_dotenv_loaded()
+
+
 def get_gemini_api_key() -> Optional[str]:
     """Retrieve GEMINI_API_KEY strictly from environment. Never log or leak."""
-    return os.getenv("GEMINI_API_KEY", "").strip() or None
+    key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not key:
+        ensure_dotenv_loaded()
+        key = os.getenv("GEMINI_API_KEY", "").strip()
+    return key or None
 
 def get_gemini_model() -> str:
     """Retrieve configured model name defaulting to gemini-3.8-flash."""

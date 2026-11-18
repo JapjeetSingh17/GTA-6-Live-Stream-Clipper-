@@ -84,20 +84,18 @@ class TestOpenRouter(unittest.TestCase):
         self.assertEqual(m["start_sec"], 90.0)
         self.assertEqual(m["end_sec"], 110.0)
 
-    def test_openrouter_api_requires_key(self):
+    @patch("gta6_clipper.routes_moments.get_openrouter_api_key", return_value=None)
+    def test_openrouter_api_requires_key(self, mock_get_key):
         """POST /api/clip/moments with engine=openrouter must fail with 400 if OPENROUTER_API_KEY is unset."""
-        with patch.dict("os.environ", {}, clear=False):
-            if "OPENROUTER_API_KEY" in os.environ:
-                del os.environ["OPENROUTER_API_KEY"]
-            resp = client.post(
-                "/api/clip/moments",
-                json={
-                    "engine": "openrouter",
-                    "url": "https://www.youtube.com/watch?v=sample123",
-                },
-            )
-            self.assertEqual(resp.status_code, 400)
-            self.assertIn("OPENROUTER_API_KEY", resp.json().get("detail", ""))
+        resp = client.post(
+            "/api/clip/moments",
+            json={
+                "engine": "openrouter",
+                "url": "https://www.youtube.com/watch?v=sample123",
+            },
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("OPENROUTER_API_KEY", resp.json().get("detail", ""))
 
     def test_parse_live_chat_excitement(self):
         """Live chat JSON must be parsed and excitement velocity calculated."""
