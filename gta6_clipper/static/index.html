@@ -1027,11 +1027,48 @@
       }
     }
 
+    // --- Backend connectivity banner ---
+    let backendOnline = null;
+    const offlineBanner = document.createElement("div");
+    offlineBanner.id = "offline-banner";
+    offlineBanner.innerHTML = `
+      <div style="background: linear-gradient(135deg, #1e1b4b, #312e81); border: 1px solid #4f46e5;
+        border-radius: var(--radius); padding: 16px 24px; margin-bottom: 20px; text-align: center;">
+        <div style="font-size: 1.1rem; font-weight: 600; color: #a5b4fc; margin-bottom: 6px;">
+          🖥️ Dashboard Preview — Backend Offline
+        </div>
+        <div style="font-size: 0.85rem; color: #c7d2fe;">
+          This is the GTA6-ZeroHour UI. To record &amp; clip live streams, run the local server:<br>
+          <code style="background: #1e1b4b; padding: 2px 8px; border-radius: 4px; color: #e0e7ff; font-size: 0.8rem;">
+            uvicorn gta6_clipper.app:app --host 127.0.0.1 --port 8000
+          </code>
+          &nbsp; then open <a href="http://127.0.0.1:8000" style="color: #818cf8;">127.0.0.1:8000</a>
+        </div>
+      </div>`;
+    offlineBanner.style.display = "none";
+    document.querySelector("header").insertAdjacentElement("afterend", offlineBanner);
+
+    async function checkBackend() {
+      try {
+        const r = await fetch("/api/status", { signal: AbortSignal.timeout(3000) });
+        if (r.ok && backendOnline !== true) {
+          backendOnline = true;
+          offlineBanner.style.display = "none";
+        }
+      } catch {
+        if (backendOnline !== false) {
+          backendOnline = false;
+          offlineBanner.style.display = "block";
+        }
+      }
+    }
+
     // Initial Load & 2s Poll Loop
+    checkBackend();
     fetchStatus();
     loadMarks();
     loadClips();
-    setInterval(fetchStatus, 2000);
+    setInterval(() => { checkBackend(); fetchStatus(); }, 2000);
   </script>
 </body>
 </html>
