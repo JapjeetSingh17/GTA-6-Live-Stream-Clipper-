@@ -26,17 +26,23 @@ logger = logging.getLogger("gta6_clipper")
 
 # --- Paths & Directories ---
 BASE_DIR = Path(__file__).resolve().parent
-STREAMS_DIR, CLIPS_DIR = BASE_DIR / "streams", BASE_DIR / "clips"
-LOGS_DIR, STATIC_DIR = BASE_DIR / "logs", BASE_DIR / "static"
-STREAMERS_FILE, MARKS_FILE = BASE_DIR / "streamers.json", BASE_DIR / "marks.json"
+IS_SERVERLESS = os.getenv("VERCEL") == "1" or "AWS_LAMBDA_FUNCTION_NAME" in os.environ
+DATA_DIR = Path("/tmp/gta6_clipper") if IS_SERVERLESS else BASE_DIR
+STREAMS_DIR, CLIPS_DIR = DATA_DIR / "streams", DATA_DIR / "clips"
+LOGS_DIR, STATIC_DIR = DATA_DIR / "logs", BASE_DIR / "static"
+STREAMERS_FILE, MARKS_FILE = DATA_DIR / "streamers.json", DATA_DIR / "marks.json"
 
-for d in (STREAMS_DIR, CLIPS_DIR, LOGS_DIR, STATIC_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+for d in (STREAMS_DIR, CLIPS_DIR, LOGS_DIR):
+    try: d.mkdir(parents=True, exist_ok=True)
+    except OSError: pass
+if not IS_SERVERLESS:
+    try: STATIC_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError: pass
 
 # --- Security Controls & Whitelists ---
 ALLOWED_HOSTS = {"127.0.0.1:8000", "localhost:8000", "127.0.0.1", "localhost", "testserver"}
 ALLOWED_ORIGINS = {"http://127.0.0.1:8000", "http://localhost:8000"}
-if os.getenv("ALLOW_ALL_HOSTS", "").lower() in ("1", "true"):
+if IS_SERVERLESS or os.getenv("ALLOW_ALL_HOSTS", "").lower() in ("1", "true"):
     ALLOWED_HOSTS.add("*")
 ALLOWED_DOMAINS = {"youtube.com", "youtu.be", "twitch.tv", "kick.com"}
 STREAMER_ID_REGEX = re.compile(r"^[a-z0-9_-]{1,40}$")
@@ -388,12 +394,15 @@ async def lifespan(app: FastAPI):
                 }
             except Exception:
                 pass
-    t1 = asyncio.create_task(watchdog_task())
-    t2 = asyncio.create_task(retention_task())
+    t1, t2 = None, None
+    if not IS_SERVERLESS:
+        t1 = asyncio.create_task(watchdog_task())
+        t2 = asyncio.create_task(retention_task())
     yield
-    t1.cancel()
-    t2.cancel()
-    await asyncio.gather(t1, t2, return_exceptions=True)
+    if t1 and t2:
+        t1.cancel()
+        t2.cancel()
+        await asyncio.gather(t1, t2, return_exceptions=True)
     for sid in list(active_streamers.keys()):
         stop_streamer(sid)
 
