@@ -24,6 +24,32 @@ logger = logging.getLogger("gta6_clipper.openrouter")
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_OPENROUTER_MODEL = "google/gemini-2.0-flash-exp:free"
 
+HYPE_PATTERN = re.compile(
+    r"\b(omg|wtf|lmao|lol|pog|poggers|kekw|holy|sh[i*]t|crazy|nooo+|rip|dead|w\b|l\b|clutch|hacker|insane|stunt|police|busted|aimbot|bussin|fire|wth|damn|no way|sheesh|clip)\b|[💀🔥😂😱🤣💥🚨]",
+    re.IGNORECASE,
+)
+
+
+def get_cookie_args(temp_dir: Optional[Path] = None) -> List[str]:
+    """
+    Return yt-dlp arguments for authentication if cookies are available.
+    Supports local cookies.txt in workspace root or YOUTUBE_COOKIES environment variable.
+    """
+    cwd_cookie = Path.cwd() / "cookies.txt"
+    if cwd_cookie.exists():
+        return ["--cookies", str(cwd_cookie), "--extractor-args", "youtube:player_client=android,web"]
+
+    env_cookies = os.getenv("YOUTUBE_COOKIES", "").strip()
+    if env_cookies and temp_dir:
+        c_path = temp_dir / "yt_cookies.txt"
+        try:
+            c_path.write_text(env_cookies, encoding="utf-8")
+            return ["--cookies", str(c_path), "--extractor-args", "youtube:player_client=android,web"]
+        except Exception:
+            pass
+
+    return ["--extractor-args", "youtube:player_client=android,web"]
+
 
 def get_openrouter_api_key() -> Optional[str]:
     """Retrieve OPENROUTER_API_KEY from environment."""
@@ -38,12 +64,13 @@ def get_openrouter_model() -> str:
 def fetch_stream_transcript(url: str, temp_dir: Path) -> Optional[Path]:
     """
     Extract auto-generated or official timestamped subtitles using yt-dlp without downloading video.
-    Returns path to downloaded .vtt file, or None if no captions available.
+    Returns path to downloaded .vtt/.srt file, or None if no captions available.
     """
     yt_dlp_bin = shutil.which("yt-dlp")
     if not yt_dlp_bin:
         raise RuntimeError("yt-dlp is not installed on this system")
 
+    cookie_args = get_cookie_args(temp_dir)
     output_tmpl = str(temp_dir / "subs")
     cmd = [
         yt_dlp_bin,
@@ -51,24 +78,179 @@ def fetch_stream_transcript(url: str, temp_dir: Path) -> Optional[Path]:
         "--skip-download",
         "--write-auto-subs",
         "--write-subs",
-        "--sub-lang", "en.*,en,en-orig",
-        "--sub-format", "vtt",
+        "--sub-langs", "all,-live_chat",
+        "--sub-format", "vtt/srt/best",
+        *cookie_args,
         "-o", output_tmpl,
         "--",
         url,
     ]
 
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
     except subprocess.TimeoutExpired:
         raise TimeoutError("Timed out extracting stream subtitles")
+    except Exception as e:
+        logger.warning(f"Error executing yt-dlp subtitle extraction: {e}")
 
-    # Locate generated .vtt file
-    vtt_candidates = list(temp_dir.glob("*.vtt"))
-    if vtt_candidates:
-        return vtt_candidates[0]
+    # Locate generated .vtt or .srt file
+    candidates = list(temp_dir.glob("*.vtt")) + list(temp_dir.glob("*.srt"))
+    if candidates:
+        return candidates[0]
 
     return None
+
+
+def fetch_stream_live_chat(url: str, temp_dir: Path, timeout_sec: int = 45) -> Optional[Path]:
+    """
+    Extract YouTube live chat replay JSON using yt-dlp without downloading video.
+    Returns path to downloaded .live_chat.json or .part file, or None if no chat replay is available.
+    """
+    yt_dlp_bin = shutil.which("yt-dlp")
+    if not yt_dlp_bin:
+        raise RuntimeError("yt-dlp is not installed on this system")
+
+    cookie_args = get_cookie_args(temp_dir)
+    output_tmpl = str(temp_dir / "%(id)s")
+    cmd = [
+        yt_dlp_bin,
+        "--no-warnings",
+        "--skip-download",
+        "--write-subs",
+        "--sub-langs", "live_chat",
+        *cookie_args,
+        "-o", output_tmpl,
+        "--",
+        url,
+    ]
+
+    try:
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        logger.info(f"Live chat extraction completed sample after {timeout_sec}s")
+    except Exception as e:
+        logger.warning(f"Live chat extraction error: {e}")
+
+    chat_candidates = list(temp_dir.glob("*.live_chat.json")) + list(temp_dir.glob("*.live_chat.json.part"))
+    if chat_candidates:
+        return chat_candidates[0]
+
+    return None
+
+
+def parse_live_chat_excitement(
+    chat_path: Path,
+    window_sec: int = 35,
+    top_k: int = 15,
+) -> List[Dict]:
+    """
+    Parse a YouTube .live_chat.json file, aggregate viewer chat velocity & hype words
+    into time windows, and return the top excitement peak moments with sample chat reactions.
+    """
+    if not chat_path.exists():
+        return []
+
+    buckets: Dict[int, Dict] = {}
+
+    try:
+        with open(chat_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    data = json.loads(line_str)
+                except Exception:
+                    continue
+
+                action = data.get("replayChatItemAction", {})
+                offset_str = action.get("videoOffsetTimeMsec", "0")
+                try:
+                    offset_msec = int(offset_str)
+                except (ValueError, TypeError):
+                    continue
+
+                sec = max(0, offset_msec // 1000)
+                b_idx = sec // window_sec
+
+                text_runs = []
+                for act in action.get("actions", []):
+                    for key in ("addChatItemAction", "addLiveChatTickerItemAction"):
+                        item = act.get(key, {}).get("item", {})
+                        msg_renderer = (
+                            item.get("liveChatTextMessageRenderer")
+                            or item.get("liveChatPaidMessageRenderer")
+                            or item.get("liveChatMembershipItemRenderer")
+                        )
+                        if msg_renderer:
+                            runs = msg_renderer.get("message", {}).get("runs", [])
+                            text = "".join(r.get("text", "") for r in runs if isinstance(r, dict))
+                            author = msg_renderer.get("authorName", {}).get("simpleText", "viewer")
+                            if text:
+                                text_runs.append((author, text.strip()))
+
+                if not text_runs:
+                    continue
+
+                if b_idx not in buckets:
+                    buckets[b_idx] = {"msgs": 0, "hype": 0, "samples": []}
+
+                for author, text in text_runs:
+                    buckets[b_idx]["msgs"] += 1
+                    hype_matches = len(HYPE_PATTERN.findall(text))
+                    buckets[b_idx]["hype"] += hype_matches
+                    if len(buckets[b_idx]["samples"]) < 6 and len(text) > 2:
+                        buckets[b_idx]["samples"].append(f"@{author}: {text}")
+
+    except Exception as e:
+        logger.warning(f"Error reading live chat JSON: {e}")
+
+    if not buckets:
+        return []
+
+    scored_windows = []
+    for b_idx, stats in buckets.items():
+        if stats["msgs"] < 2:
+            continue
+        raw_score = stats["msgs"] * 1.0 + stats["hype"] * 2.5
+        s_sec = b_idx * window_sec
+        e_sec = s_sec + window_sec
+        scored_windows.append({
+            "bucket": b_idx,
+            "start_sec": s_sec,
+            "end_sec": e_sec,
+            "score": raw_score,
+            "msgs": stats["msgs"],
+            "hype": stats["hype"],
+            "samples": stats["samples"],
+        })
+
+    scored_windows.sort(key=lambda x: x["score"], reverse=True)
+
+    selected_peaks = []
+    for win in scored_windows:
+        overlap = any(abs(win["start_sec"] - p["start_sec"]) < window_sec for p in selected_peaks)
+        if not overlap:
+            selected_peaks.append(win)
+            if len(selected_peaks) >= top_k:
+                break
+
+    results = []
+    for p in selected_peaks:
+        results.append({
+            "start": format_seconds_to_hms(p["start_sec"]),
+            "end": format_seconds_to_hms(p["end_sec"]),
+            "start_sec": p["start_sec"],
+            "end_sec": p["end_sec"],
+            "duration_sec": p["end_sec"] - p["start_sec"],
+            "raw_score": p["score"],
+            "msgs": p["msgs"],
+            "hype": p["hype"],
+            "samples": p["samples"],
+        })
+
+    results.sort(key=lambda x: x["start_sec"])
+    return results
 
 
 def parse_vtt_to_timestamped_text(vtt_path: Path, max_lines: int = 15000) -> str:
@@ -255,6 +437,7 @@ def analyse_transcript_openrouter(
                 "score": int(m.get("score", 7)),
                 "title": m.get("title", f"Stream Highlight #{idx+1}"),
                 "reason": m.get("reason", "High-energy stream event"),
+                "source": "captions",
             })
         except Exception:
             continue
@@ -265,3 +448,135 @@ def analyse_transcript_openrouter(
     # Re-sort chronologically for timeline editing
     top_moments.sort(key=lambda x: x["start_sec"])
     return top_moments
+
+
+def analyse_chat_spikes_openrouter(
+    api_key: str,
+    peaks: List[Dict],
+    max_moments: int = 15,
+    style_hint: Optional[str] = None,
+    model: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Given detected excitement peaks from YouTube live chat replay, query OpenRouter free LLM
+    to generate punchy viral titles, viral score (1-10), and descriptions of the stream event.
+    """
+    if not peaks:
+        return []
+
+    system_instruction = (
+        "You are an elite gaming stream editor and viral video curator specializing in Grand Theft Auto (GTA). "
+        "You are given candidate highlight timestamps extracted from massive viewer live chat excitement explosions. "
+        "For each peak timestamp window, analyze the viewer chat reactions (shouting, memes, laughter, shock) "
+        "and determine what in-game event caused the reaction. "
+        "Generate a punchy, click-worthy viral title, a viral score from 1 to 10, and a 1-sentence reason. "
+        "You MUST output valid JSON matching this schema:\n"
+        "{\n"
+        '  "moments": [\n'
+        '    {\n'
+        '      "start": "HH:MM:SS",\n'
+        '      "end": "HH:MM:SS",\n'
+        '      "score": 1 to 10,\n'
+        '      "title": "Punchy viral clip title",\n'
+        '      "reason": "1-sentence description of the moment from chat reactions"\n'
+        '    }\n'
+        '  ]\n'
+        "}"
+    )
+
+    prompt_lines = ["PEAK LIVE CHAT EXCITEMENT WINDOWS:\n"]
+    if style_hint and style_hint.strip():
+        prompt_lines.append(f"STYLE PREFERENCE: {style_hint.strip()}\n")
+
+    for i, p in enumerate(peaks):
+        chat_summary = " | ".join(p.get("samples", [])) or "High volume chat reaction"
+        prompt_lines.append(
+            f"Peak #{i+1}: [{p['start']} - {p['end']}] (Chat messages: {p['msgs']}, Hype score: {int(p['raw_score'])})\n"
+            f"Viewer Reactions: {chat_summary}\n"
+        )
+
+    user_prompt = "\n".join(prompt_lines)
+
+    raw_response = call_openrouter_chat(
+        api_key=api_key,
+        prompt=user_prompt,
+        system_instruction=system_instruction,
+        model=model,
+    )
+
+    cleaned = raw_response.strip()
+    if cleaned.startswith("```"):
+        parts = cleaned.split("```")
+        if len(parts) >= 2:
+            cleaned = parts[1]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:].strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as err:
+        logger.warning(f"Failed to parse LLM chat moments JSON: {err}, falling back to peak metrics")
+        return [
+            {
+                "start": p["start"],
+                "end": p["end"],
+                "start_sec": p["start_sec"],
+                "end_sec": p["end_sec"],
+                "duration_sec": p["duration_sec"],
+                "score": 8,
+                "title": f"Chat Hype Moment at {p['start']}",
+                "reason": f"Explosion of {p['msgs']} live chat messages and viewer hype",
+                "source": "live_chat",
+            }
+            for p in peaks[:max_moments]
+        ]
+
+    raw_moments = parsed.get("moments", [])
+    valid_moments = []
+
+    for idx, m in enumerate(raw_moments):
+        try:
+            s_str = m.get("start", "")
+            e_str = m.get("end", "")
+            if not s_str or not e_str:
+                if idx < len(peaks):
+                    s_str = peaks[idx]["start"]
+                    e_str = peaks[idx]["end"]
+                else:
+                    continue
+
+            s_sec = parse_time_offset(s_str)
+            e_sec = parse_time_offset(e_str)
+            if e_sec <= s_sec:
+                e_sec = s_sec + 35.0
+
+            valid_moments.append({
+                "start": format_seconds_to_hms(s_sec),
+                "end": format_seconds_to_hms(e_sec),
+                "start_sec": s_sec,
+                "end_sec": e_sec,
+                "duration_sec": round(e_sec - s_sec, 1),
+                "score": int(m.get("score", 8)),
+                "title": m.get("title", f"GTA 6 Chat Peak #{idx+1}"),
+                "reason": m.get("reason", "Intense viewer reaction spike"),
+                "source": "live_chat",
+            })
+        except Exception:
+            continue
+
+    if not valid_moments and peaks:
+        for idx, p in enumerate(peaks[:max_moments]):
+            valid_moments.append({
+                "start": p["start"],
+                "end": p["end"],
+                "start_sec": p["start_sec"],
+                "end_sec": p["end_sec"],
+                "duration_sec": p["duration_sec"],
+                "score": 8,
+                "title": f"Live Chat Reaction at {p['start']}",
+                "reason": f"Spike of {p['msgs']} chat messages",
+                "source": "live_chat",
+            })
+
+    valid_moments.sort(key=lambda x: x["start_sec"])
+    return valid_moments[:max_moments]

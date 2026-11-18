@@ -632,7 +632,7 @@
     </div>
 
     <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
-      <div id="top-moments-estimate" style="font-size: 0.75rem; color: #38bdf8;">✨ OpenRouter Free Mode: 100% Free ($0.00) • Fast timestamped caption analysis for 6-8h streams</div>
+      <div id="top-moments-estimate" style="font-size: 0.75rem; color: #38bdf8;">✨ OpenRouter Free Mode: 100% Free ($0.00) • Subtitles & Live Chat Hype Spikes (bypasses YouTube GTA 6 caption/copyright restrictions)</div>
       <button type="button" id="btn-top-moments-start" class="btn-primary" onclick="startTopMomentsJob(this)" style="padding: 8px 18px; font-weight: 600;">✨ Find Best Moments</button>
     </div>
 
@@ -1705,7 +1705,7 @@
       const estEl = document.getElementById("top-moments-estimate");
       const urlWrapper = document.getElementById("wrapper-openrouter-url");
       if (engine === "openrouter") {
-        estEl.textContent = "✨ OpenRouter Free Mode: 100% Free ($0.00) • Fast timestamped caption analysis for 6-8h streams";
+        estEl.textContent = "✨ OpenRouter Free Mode: 100% Free ($0.00) • Subtitles & Live Chat Hype Spikes (bypasses YouTube GTA 6 caption/copyright restrictions)";
         estEl.style.color = "#38bdf8";
         if (urlWrapper) urlWrapper.style.display = "block";
       } else {
@@ -1774,7 +1774,7 @@
         progressBox.style.display = "block";
         resultsBox.style.display = "none";
         const statusMsg = engine === "openrouter"
-          ? "Extracting stream captions & querying OpenRouter Free LLM..."
+          ? "Extracting subtitles & analyzing Live Chat Hype..."
           : "Analyzing video chunks with Gemini 3.8 Flash...";
         updateTopMomentsProgress(10, statusMsg);
 
@@ -1797,7 +1797,10 @@
         if (job.status === "running" || job.status === "queued") {
           const p = job.progress || {};
           const chunkMsg = p.total_chunks > 1 ? ` (Chunk ${p.current_chunk}/${p.total_chunks})` : "";
-          updateTopMomentsProgress(p.percent || 10, `Analyzing with Gemini 3.8 Flash${chunkMsg}...`);
+          const statusText = (job.engine === "openrouter")
+            ? "Analyzing stream (Subtitles + Live Chat Hype)..."
+            : `Analyzing with Gemini 3.8 Flash${chunkMsg}...`;
+          updateTopMomentsProgress(p.percent || 10, statusText);
         } else if (job.status === "done") {
           clearInterval(topMomentsPoller);
           topMomentsPoller = null;
@@ -1881,10 +1884,17 @@
         listEl.innerHTML = moments.map((m, idx) => {
           const isHigh = m.score >= 8;
           const scoreColor = isHigh ? "var(--neon-green)" : "var(--neon-yellow)";
+          const sourceBadge = (m.source === 'live_chat')
+            ? '<span style="font-size: 0.65rem; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); padding: 1px 6px; border-radius: 4px; margin-left: 6px;">💬 Chat Hype</span>'
+            : '<span style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 1px 6px; border-radius: 4px; margin-left: 6px;">📝 Captions</span>';
+
           return `
             <div style="background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 6px; padding: 8px 12px; font-size: 0.8rem;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-weight: 700; color: #f1f5f9;">#${idx+1} ${m.title}</span>
+                <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                  <span style="font-weight: 700; color: #f1f5f9;">#${idx+1} ${m.title}</span>
+                  ${sourceBadge}
+                </div>
                 <span style="color: ${scoreColor}; font-weight: 700; font-size: 0.75rem; border: 1px solid ${scoreColor}; padding: 2px 6px; border-radius: 4px;">
                   ★ ${m.score}/10
                 </span>

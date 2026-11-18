@@ -211,12 +211,15 @@ async def start_moments_analysis(body: MomentsRequest):
 
 
 async def _run_openrouter_job(job_id: str, url: Optional[str], filename: Optional[str], params: Dict, api_key: str):
-    """Background processor for OpenRouter caption-based highlights."""
+    """Background processor for OpenRouter highlights (Subtitles + Live Chat Hype Fallback)."""
     global ACTIVE_JOB_ID
     from gta6_clipper.openrouter import (
         fetch_stream_transcript,
         parse_vtt_to_timestamped_text,
         analyse_transcript_openrouter,
+        fetch_stream_live_chat,
+        parse_live_chat_excitement,
+        analyse_chat_spikes_openrouter,
     )
 
     temp_dir = Path(tempfile.mkdtemp(prefix=f"gta6_openrouter_{job_id}_"))
@@ -226,30 +229,65 @@ async def _run_openrouter_job(job_id: str, url: Optional[str], filename: Optiona
 
     try:
         transcript_text = ""
-        if url:
-            job["progress"]["percent"] = 30
-            vtt_path = await asyncio.to_thread(fetch_stream_transcript, url, temp_dir)
-            if not vtt_path or not vtt_path.exists():
-                raise RuntimeError("Could not find auto-generated or official subtitles for this stream. Ensure the stream or VOD has captions available.")
-            job["progress"]["percent"] = 55
+        moments = []
+        detection_source = "captions"
+
+        if not url:
+            raise RuntimeError("OpenRouter free highlight extraction requires a YouTube Live or VOD URL.")
+
+        # Step 1: Attempt subtitle/dialogue extraction
+        job["progress"]["percent"] = 25
+        vtt_path = await asyncio.to_thread(fetch_stream_transcript, url, temp_dir)
+        if vtt_path and vtt_path.exists():
+            job["progress"]["percent"] = 45
             transcript_text = await asyncio.to_thread(parse_vtt_to_timestamped_text, vtt_path)
+
+        if transcript_text and len(transcript_text.strip()) >= 50:
+            # Captions successfully extracted
+            job["progress"]["percent"] = 75
+            moments = await asyncio.to_thread(
+                analyse_transcript_openrouter,
+                api_key,
+                transcript_text,
+                max_moments=params.get("max_moments", 15),
+                style_hint=params.get("style_hint"),
+            )
+            detection_source = "captions"
         else:
-            raise RuntimeError("OpenRouter free highlight extraction requires a YouTube Live or VOD URL with captions.")
+            # Step 2: Fallback to Live Chat Replay excitement analysis (immune to YouTube copyright music & caption blocks)
+            logger.info(f"Subtitles unavailable or restricted for {url}. Falling back to Live Chat excitement analysis...")
+            job["progress"]["percent"] = 40
+            chat_path = await asyncio.to_thread(fetch_stream_live_chat, url, temp_dir)
+            if not chat_path or not chat_path.exists():
+                raise RuntimeError(
+                    "YouTube has restricted auto-captions and live chat replay on this stream (GTA 6 copyright/age policy). "
+                    "Tip: You can switch to the 'Gemini 3.8 Flash (Direct Video)' engine to analyze recorded clips visually, "
+                    "or provide a YouTube cookies.txt file to unlock restricted streams."
+                )
 
-        if not transcript_text or len(transcript_text.strip()) < 50:
-            raise RuntimeError("Stream transcript was empty or unavailable.")
+            job["progress"]["percent"] = 65
+            peaks = await asyncio.to_thread(
+                parse_live_chat_excitement,
+                chat_path,
+                window_sec=35,
+                top_k=params.get("max_moments", 15),
+            )
+            if not peaks:
+                raise RuntimeError("No significant chat activity or excitement spikes were found in this stream.")
 
-        job["progress"]["percent"] = 75
-        moments = await asyncio.to_thread(
-            analyse_transcript_openrouter,
-            api_key,
-            transcript_text,
-            max_moments=params.get("max_moments", 15),
-            style_hint=params.get("style_hint"),
-        )
+            job["progress"]["percent"] = 85
+            moments = await asyncio.to_thread(
+                analyse_chat_spikes_openrouter,
+                api_key,
+                peaks,
+                max_moments=params.get("max_moments", 15),
+                style_hint=params.get("style_hint"),
+            )
+            detection_source = "live_chat"
 
         job["progress"]["percent"] = 100
         job["status"] = "done"
+        job["detection_source"] = detection_source
         job["results"] = moments
 
     except Exception as e:
