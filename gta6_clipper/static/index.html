@@ -1841,7 +1841,7 @@
       showToast("Analysis cancelled", "info");
     }
 
-    function cutOrExtractMoment(startSec, endSec, startHms, endHms, title, btn) {
+    async function cutOrExtractMoment(startSec, endSec, startHms, endHms, title, btn) {
       const urlInput = document.getElementById("top-moments-url");
       const select = document.getElementById("top-moments-clip-select");
       const streamUrl = urlInput ? urlInput.value.trim() : "";
@@ -1850,17 +1850,48 @@
       if (filename) {
         cutSingleMoment(filename, startSec, endSec, title, btn);
       } else if (streamUrl) {
-        const extUrl = document.getElementById("extract-url");
-        const extStart = document.getElementById("extract-start");
-        const extEnd = document.getElementById("extract-end");
-        const extTitle = document.getElementById("extract-title");
+        // Pre-fill extractor inputs for visibility
+        const extUrl = document.getElementById("extractor-url");
+        const extStart = document.getElementById("extractor-start");
+        const extEnd = document.getElementById("extractor-end");
+        const extTitle = document.getElementById("extractor-title");
         if (extUrl) extUrl.value = streamUrl;
         if (extStart) extStart.value = startHms;
         if (extEnd) extEnd.value = endHms;
         if (extTitle) extTitle.value = title;
-        showToast(`Loaded moment [${startHms} - ${endHms}] into Extractor above! Click "Extract Clip" to cut.`, "info");
-        const extPanel = document.querySelector(".extractor-panel");
-        if (extPanel) extPanel.scrollIntoView({ behavior: "smooth" });
+
+        const origText = btn.textContent;
+        btn.textContent = "⏳ Cutting Clip...";
+        btn.disabled = true;
+
+        try {
+          showToast(`Extracting highlight: "${title}" (${startHms} - ${endHms})...`, "info");
+          const payload = {
+            url: streamUrl,
+            start_time: startHms,
+            end_time: endHms,
+            title: title || "Stream Highlight"
+          };
+          const res = await fetch("/api/clip/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (res.ok && data.clip) {
+            showToast(`✅ Extracted: "${data.clip.title}"! Scroll down to Recorded Clips to play or download.`, "success");
+            await loadClips();
+            const clipsContainer = document.getElementById("clips-container");
+            if (clipsContainer) clipsContainer.scrollIntoView({ behavior: "smooth" });
+          } else {
+            showToast(data.detail || "Clip extraction failed", "error");
+          }
+        } catch (err) {
+          showToast("Network error during clip extraction", "error");
+        } finally {
+          btn.textContent = origText;
+          btn.disabled = false;
+        }
       } else {
         showToast("Please choose a clip or stream URL", "error");
       }
