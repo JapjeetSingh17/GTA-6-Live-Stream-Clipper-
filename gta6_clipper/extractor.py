@@ -191,14 +191,22 @@ def extract_stream_section(url: str, start_sec: float, end_sec: float, output_pa
 
     cmd = [
         "yt-dlp",
+        "--force-ipv4",
         "--no-part",
         "--force-keyframes-at-cuts",
         "--download-sections", section_spec,
     ]
 
-    # YouTube live streams support rewinding past live stream segments
+    # YouTube live streams and VODs: use mobile player clients and node JS runtime
     if "youtube.com" in url or "youtu.be" in url:
-        cmd.append("--live-from-start")
+        cmd.extend([
+            "--js-runtimes", "node",
+            "--extractor-args", "youtube:player_client=ios,android,web",
+            "--live-from-start",
+        ])
+        cwd_cookie = Path.cwd() / "cookies.txt"
+        if cwd_cookie.exists():
+            cmd.extend(["--cookies", str(cwd_cookie)])
 
     cmd.extend(["-o", str(output_path), "--", url])
 
