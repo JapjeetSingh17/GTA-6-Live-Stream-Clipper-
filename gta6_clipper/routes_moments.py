@@ -152,7 +152,8 @@ async def _run_moments_job(job_id: str, file_path: Path, params: Dict, api_key: 
 
     try:
         source_dur = get_media_duration(file_path)
-        client = genai.Client(api_key=api_key)
+        from google.genai import types
+        client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=60000))
 
         # Step 1: Generate lightweight proxy
         job["progress"]["percent"] = 5
