@@ -695,5 +695,5 @@ async def reveal_file(body: RevealRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reveal in Finder: {e}")
 
-from gta6_clipper.routes_clip import router as r1; from gta6_clipper.routes_moments import router as r2; app.include_router(r1); app.include_router(r2)
+from gta6_clipper.routes_clip import router as r1; from gta6_clipper.routes_moments import router as r2; from gta6_clipper.routes_auth import router as r3, setup_auth; app.include_router(r1); app.include_router(r2); app.include_router(r3); setup_auth(app)
 if STATIC_DIR.exists(): app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

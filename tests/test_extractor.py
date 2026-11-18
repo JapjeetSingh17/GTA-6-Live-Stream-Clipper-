@@ -17,7 +17,7 @@ from gta6_clipper.extractor import (
     parse_time_offset,
 )
 
-client = TestClient(app, headers={"Host": "localhost:8000"})
+client = TestClient(app, headers={"Host": "localhost:8000", "X-Access-Key": "Javelloui*~*.Yrs->2004"})
 
 class TestExtractorAndTrimmer(unittest.TestCase):
     def test_parse_time_offset_valid_formats(self):

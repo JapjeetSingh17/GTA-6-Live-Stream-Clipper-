@@ -28,7 +28,7 @@ from gta6_clipper.resolve_export import (
     try_davinci_resolve_scripting,
 )
 
-client = TestClient(app, headers={"Host": "localhost:8000"})
+client = TestClient(app, headers={"Host": "localhost:8000", "X-Access-Key": "Javelloui*~*.Yrs->2004"})
 
 
 class TestMomentsAnalyzer(unittest.TestCase):

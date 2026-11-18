@@ -509,6 +509,7 @@
       <div class="metric-item">SERVER: <span class="metric-value">127.0.0.1:8000</span></div>
       <div class="metric-item">HOST DISK: <span class="metric-value" id="disk-free-display">-- GB Free</span></div>
       <div class="metric-item">GUARD: <span class="metric-value" id="disk-guard-display">NORMAL</span></div>
+      <button type="button" class="btn-danger" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 4px; cursor: pointer;" onclick="handleLogout()" title="Lock dashboard and log out">🔒 Lock</button>
     </div>
   </header>
 
@@ -678,6 +679,24 @@
 
   <script>
     const API_BASE = "";
+
+    // Auth 401 interceptor & logout
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+      const response = await originalFetch.apply(this, args);
+      if (response.status === 401) {
+        window.location.href = "/login.html";
+      }
+      return response;
+    };
+
+    async function handleLogout() {
+      try {
+        await originalFetch("/api/auth/logout", { method: "POST" });
+      } catch (_) {}
+      localStorage.removeItem("gta6_session_token");
+      window.location.href = "/login.html";
+    }
 
     function showToast(message, type = "info") {
       const container = document.getElementById("toast-container");

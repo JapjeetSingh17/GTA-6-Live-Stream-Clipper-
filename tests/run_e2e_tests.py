@@ -97,6 +97,7 @@ import test_static_ui
 import test_scenarios
 import test_extractor
 import test_moments
+import test_auth
 
 
 def create_full_suite() -> unittest.TestSuite:
@@ -111,6 +112,7 @@ def create_full_suite() -> unittest.TestSuite:
     suite.addTests(loader.loadTestsFromModule(test_scenarios))
     suite.addTests(loader.loadTestsFromModule(test_extractor))
     suite.addTests(loader.loadTestsFromModule(test_moments))
+    suite.addTests(loader.loadTestsFromModule(test_auth))
 
     return suite
 

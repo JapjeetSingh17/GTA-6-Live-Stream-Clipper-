@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>GTA6-ZeroHour // Access Key Required</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #060913;
+      --surface: #0e1526;
+      --surface-focus: #151e36;
+      --border: #1e293b;
+      --border-glow: #06b6d4;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --neon-pink: #ec4899;
+      --neon-cyan: #06b6d4;
+      --neon-green: #10b981;
+      --neon-red: #ef4444;
+      --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      --radius: 10px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 50% 20%, rgba(6, 182, 212, 0.08) 0%, transparent 60%),
+        radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.05) 0%, transparent 50%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      line-height: 1.5;
+    }
+
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      width: 100%;
+      max-width: 440px;
+      padding: 36px 32px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(6, 182, 212, 0.08);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .login-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink));
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--neon-cyan);
+      background: rgba(6, 182, 212, 0.12);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      padding: 3px 10px;
+      border-radius: 9999px;
+      margin-bottom: 12px;
+    }
+
+    .title {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-key {
+      width: 100%;
+      background: #090e1a;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 44px 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+      color: #ffffff;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .input-key:focus {
+      border-color: var(--neon-cyan);
+      box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.18);
+      background: var(--surface-focus);
+    }
+
+    .toggle-visibility {
+      position: absolute;
+      right: 12px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .toggle-visibility:hover {
+      color: var(--neon-cyan);
+    }
+
+    .btn-submit {
+      width: 100%;
+      background: linear-gradient(135deg, var(--neon-cyan), #0284c7);
+      color: #040812;
+      border: none;
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-submit:hover:not(:disabled) {
+      filter: brightness(1.15);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(6, 182, 212, 0.35);
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .error-box {
+      display: none;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      border-radius: 6px;
+      color: #fca5a5;
+      font-size: 0.8rem;
+      padding: 10px 12px;
+      margin-bottom: 18px;
+      text-align: center;
+      animation: shake 0.3s ease-in-out;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+
+    .footer-note {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 0.72rem;
+      color: #64748b;
+      font-family: var(--font-mono);
+    }
+  </style>
+</head>
+<body>
+
+  <main class="login-card">
+    <div class="header">
+      <div class="badge">RESTRICTED ACCESS</div>
+      <h1 class="title">GTA6-ZeroHour</h1>
+      <p class="subtitle">Enter your operator key to unlock the stream clipper</p>
+    </div>
+
+    <div id="error-box" class="error-box" role="alert"></div>
+
+    <form id="login-form" onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label class="form-label" for="access-key">
+          <span>KEY</span>
+          <span style="font-size: 0.68rem; color: #64748b; font-weight: normal;">REQUIRED</span>
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="password" 
+            id="access-key" 
+            class="input-key" 
+            placeholder="Enter operator key..." 
+            autocomplete="current-password"
+            required
+            autofocus
+          />
+          <button 
+            type="button" 
+            id="btn-toggle" 
+            class="toggle-visibility" 
+            title="Toggle visibility"
+            onclick="toggleKeyVisibility()"
+          >👁️</button>
+        </div>
+      </div>
+
+      <button type="submit" id="btn-submit" class="btn-submit">
+        <span>UNLOCK DASHBOARD</span>
+        <span>→</span>
+      </button>
+    </form>
+
+    <div class="footer-note">
+      DVR REWIND // ZERO-RE-ENCODE // GEMINI 3.8 FLASH
+    </div>
+  </main>
+
+  <script>
+    function toggleKeyVisibility() {
+      const input = document.getElementById("access-key");
+      const btn = document.getElementById("btn-toggle");
+      if (input.type === "password") {
+        input.type = "text";
+        btn.textContent = "🙈";
+      } else {
+        input.type = "password";
+        btn.textContent = "👁️";
+      }
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const input = document.getElementById("access-key");
+      const errBox = document.getElementById("error-box");
+      const submitBtn = document.getElementById("btn-submit");
+      const keyVal = input.value.trim();
+
+      if (!keyVal) return;
+
+      errBox.style.display = "none";
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = "<span>VERIFYING KEY...</span>";
+
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: keyVal })
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && data.status === "ok") {
+          // Store token in localStorage as secondary fallback
+          if (data.token) {
+            localStorage.setItem("gta6_session_token", data.token);
+          }
+          submitBtn.innerHTML = "<span>ACCESS GRANTED ✓</span>";
+          submitBtn.style.background = "var(--neon-green)";
+          setTimeout(() => {
+            window.location.href = "/";
+          }, 350);
+        } else {
+          errBox.textContent = data.detail || data.message || "Invalid Key. Access denied.";
+          errBox.style.display = "block";
+          input.select();
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = "<span>UNLOCK DASHBOARD</span><span>→</span>";
+        }
+      } catch (err) {
+        errBox.textContent = "Network error connecting to server. Please try again.";
+        errBox.style.display = "block";
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = "<span>UNLOCK DASHBOARD</span><span>→</span>";
+      }
+    }
+
+    // Auto-redirect if already authenticated
+    (async function checkExistingAuth() {
+      try {
+        const res = await fetch("/api/auth/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated) {
+            window.location.href = "/";
+          }
+        }
+      } catch (_) {}
+    })();
+  </script>
+</body>
+</html>

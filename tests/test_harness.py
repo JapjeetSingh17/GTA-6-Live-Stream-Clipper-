@@ -93,16 +93,20 @@ def start_test_server(timeout_sec: float = 8.0) -> bool:
         py_bin,
         "-m",
         "uvicorn",
-        "app:app",
+        "gta6_clipper.app:app",
         "--host",
         SERVER_HOST,
         "--port",
         str(SERVER_PORT),
     ]
 
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT)
+
     _SERVER_PROCESS = subprocess.Popen(
         cmd,
-        cwd=str(APP_DIR),
+        cwd=str(REPO_ROOT),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
@@ -161,6 +165,13 @@ def raw_http_request(
     if headers:
         for k, v in headers.items():
             req_headers[k] = v
+
+    # Provide default X-Access-Key for test harness unless caller explicitly sets X-No-Auth
+    if "X-Access-Key" not in req_headers and "Cookie" not in req_headers:
+        if req_headers.get("X-No-Auth") == "1":
+            req_headers.pop("X-No-Auth", None)
+        else:
+            req_headers["X-Access-Key"] = os.getenv("ACCESS_KEY", "Javelloui*~*.Yrs->2004")
 
     try:
         conn.request(method, path, body=payload, headers=req_headers)
