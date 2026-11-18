@@ -1,13 +1,9 @@
 {
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "gta6_clipper/**"
-    }
-  },
+  "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/(.*)",
-      "destination": "/api"
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
     }
   ]
 }
