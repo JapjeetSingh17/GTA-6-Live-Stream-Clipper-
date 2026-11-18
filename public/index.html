@@ -1209,6 +1209,306 @@
       }
     }
 
+    // --- Moments AI Handlers ---
+    const momentsPollers = {};
+
+    async function openMomentsDrawer(filename) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const drawer = document.getElementById(`moments-drawer-${safeId}`);
+      if (!drawer) return;
+      const isVisible = drawer.style.display === "block";
+      drawer.style.display = isVisible ? "none" : "block";
+
+      if (!isVisible) {
+        // Fetch non-network estimate
+        const estEl = document.getElementById(`moments-estimate-${safeId}`);
+        try {
+          const res = await fetch("/api/clip/moments/estimate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const est = data.estimate;
+            estEl.textContent = `Est: ${est.chunk_count} chunk(s) (${est.duration_hms}) • ~${est.approx_tokens.toLocaleString()} tokens`;
+          }
+        } catch (e) {
+          estEl.textContent = "";
+        }
+      }
+    }
+
+    async function startMomentsJob(filename, btn) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const hintInput = document.getElementById(`moments-hint-${safeId}`);
+      const maxSelect = document.getElementById(`moments-max-${safeId}`);
+      const progressBox = document.getElementById(`moments-progress-box-${safeId}`);
+      const startBox = document.getElementById(`moments-start-box-${safeId}`);
+      const resultsBox = document.getElementById(`moments-results-box-${safeId}`);
+
+      const styleHint = hintInput ? hintInput.value.trim() : null;
+      const maxMoments = maxSelect ? parseInt(maxSelect.value) : 10;
+
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/api/clip/moments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename,
+            style_hint: styleHint || null,
+            max_moments: maxMoments
+          })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.detail || "Failed to start AI analysis", "error");
+          btn.disabled = false;
+          return;
+        }
+
+        const jobId = data.job_id;
+        if (data.cached) {
+          showToast("Instant cache hit: loaded previously analyzed moments!", "success");
+          pollMomentsJob(filename, jobId, safeId);
+          return;
+        }
+
+        // Show progress box
+        startBox.style.display = "none";
+        resultsBox.style.display = "none";
+        progressBox.style.display = "block";
+        updateMomentsProgress(safeId, 5, "Preparing video proxy for Gemini...");
+
+        // Start polling
+        momentsPollers[safeId] = setInterval(() => pollMomentsJob(filename, jobId, safeId), 2000);
+
+      } catch (err) {
+        showToast("Network error starting analysis", "error");
+        btn.disabled = false;
+      }
+    }
+
+    async function pollMomentsJob(filename, jobId, safeId) {
+      try {
+        const res = await fetch(`/api/clip/moments/${jobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+
+        const progressBox = document.getElementById(`moments-progress-box-${safeId}`);
+        const startBox = document.getElementById(`moments-start-box-${safeId}`);
+
+        if (job.status === "running" || job.status === "queued") {
+          const p = job.progress || {};
+          const chunkMsg = p.total_chunks > 1 ? ` (Chunk ${p.current_chunk}/${p.total_chunks})` : "";
+          updateMomentsProgress(safeId, p.percent || 10, `Analyzing with Gemini 3.8 Flash${chunkMsg}...`);
+        } else if (job.status === "done") {
+          clearInterval(momentsPollers[safeId]);
+          delete momentsPollers[safeId];
+          progressBox.style.display = "none";
+          startBox.style.display = "block";
+          renderMomentsResults(filename, safeId, job.results || []);
+          showToast(`Found ${job.results.length} highlight moments!`, "success");
+        } else if (job.status === "error" || job.status === "cancelled") {
+          clearInterval(momentsPollers[safeId]);
+          delete momentsPollers[safeId];
+          progressBox.style.display = "none";
+          startBox.style.display = "block";
+          showToast(job.error || "Analysis failed", "error");
+        }
+      } catch (e) {
+        console.error("Poll moments error", e);
+      }
+    }
+
+    function updateMomentsProgress(safeId, percent, text) {
+      const bar = document.getElementById(`moments-bar-${safeId}`);
+      const txt = document.getElementById(`moments-status-text-${safeId}`);
+      const pct = document.getElementById(`moments-percent-text-${safeId}`);
+      if (bar) bar.style.width = `${percent}%`;
+      if (txt) txt.textContent = text;
+      if (pct) pct.textContent = `${percent}%`;
+    }
+
+    async function cancelMomentsJob(safeId) {
+      clearInterval(momentsPollers[safeId]);
+      delete momentsPollers[safeId];
+      const progressBox = document.getElementById(`moments-progress-box-${safeId}`);
+      const startBox = document.getElementById(`moments-start-box-${safeId}`);
+      if (progressBox) progressBox.style.display = "none";
+      if (startBox) startBox.style.display = "block";
+      showToast("Analysis cancelled", "info");
+    }
+
+    function renderMomentsResults(filename, safeId, moments) {
+      const resultsBox = document.getElementById(`moments-results-box-${safeId}`);
+      const countEl = document.getElementById(`moments-count-${safeId}`);
+      const listEl = document.getElementById(`moments-list-${safeId}`);
+      if (!resultsBox || !listEl) return;
+
+      countEl.textContent = `Found ${moments.length} Highlights`;
+      resultsBox.dataset.moments = JSON.stringify(moments);
+
+      if (moments.length === 0) {
+        listEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.75rem;">No highlight moments met the criteria.</div>';
+      } else {
+        listEl.innerHTML = moments.map((m, idx) => {
+          const isHigh = m.score >= 8;
+          const scoreColor = isHigh ? "var(--neon-green)" : "var(--neon-yellow)";
+          return `
+            <div style="background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 4px; padding: 6px 8px; font-size: 0.75rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <span style="font-weight: 600; color: #f1f5f9;">#${idx+1} ${m.title}</span>
+                <span style="color: ${scoreColor}; font-weight: 700; font-size: 0.7rem; border: 1px solid ${scoreColor}; padding: 1px 4px; border-radius: 3px;">
+                  ★ ${m.score}/10
+                </span>
+              </div>
+              <div style="color: #94a3b8; font-size: 0.7rem; margin-bottom: 4px;">${m.reason || ""}</div>
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+                <span style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.7rem;">
+                  ${m.start} → ${m.end} (${m.duration_sec}s)
+                </span>
+                <div style="display: flex; gap: 4px;">
+                  <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.68rem;" onclick="seekVideo('${safeId}', ${m.start_sec})">▶ Preview</button>
+                  <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.68rem;" onclick="useInTrimmer('${filename}', ${m.start_sec}, ${m.end_sec})">✂ Use In Trimmer</button>
+                  <button type="button" class="btn-clip" style="padding: 2px 6px; font-size: 0.68rem;" onclick="cutSingleMoment('${filename}', ${m.start_sec}, ${m.end_sec}, '${m.title.replace(/'/g, "\\'")}', this)">⚡ Cut</button>
+                </div>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+      resultsBox.style.display = "block";
+    }
+
+    function seekVideo(safeId, startSec) {
+      const video = document.getElementById(`video-${safeId}`);
+      if (video) {
+        video.currentTime = startSec;
+        video.play();
+      }
+    }
+
+    function useInTrimmer(filename, startSec, endSec) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const trimDrawer = document.getElementById(`trim-drawer-${safeId}`);
+      if (trimDrawer) {
+        trimDrawer.style.display = "block";
+        const startInput = document.getElementById(`trim-start-${safeId}`);
+        const endInput = document.getElementById(`trim-end-${safeId}`);
+        if (startInput) startInput.value = startSec.toFixed(1);
+        if (endInput) endInput.value = endSec.toFixed(1);
+        seekVideo(safeId, startSec);
+        showToast(`Loaded ${startSec}s - ${endSec}s into trimmer`, "info");
+      }
+    }
+
+    async function cutSingleMoment(filename, startSec, endSec, title, btn) {
+      const origText = btn.textContent;
+      btn.textContent = "Cutting...";
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/clip/trim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename,
+            start_sec: startSec,
+            end_sec: endSec,
+            mode: "fast",
+            title_suffix: "moment"
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`Cut: ${data.clip.title}`, "success");
+          loadClips();
+        } else {
+          showToast(data.detail || "Cut failed", "error");
+        }
+      } catch (e) {
+        showToast("Error cutting moment", "error");
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    }
+
+    async function batchCutMoments(filename, btn) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const resultsBox = document.getElementById(`moments-results-box-${safeId}`);
+      if (!resultsBox || !resultsBox.dataset.moments) return;
+
+      const moments = JSON.parse(resultsBox.dataset.moments);
+      if (moments.length === 0) return;
+
+      const origText = btn.textContent;
+      btn.textContent = `Cutting 0/${moments.length}...`;
+      btn.disabled = true;
+
+      let cutCount = 0;
+      for (let i = 0; i < moments.length; i++) {
+        const m = moments[i];
+        btn.textContent = `Cutting ${i+1}/${moments.length}...`;
+        try {
+          const res = await fetch("/api/clip/trim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              filename,
+              start_sec: m.start_sec,
+              end_sec: m.end_sec,
+              mode: "fast",
+              title_suffix: `moment_${i+1}`
+            })
+          });
+          if (res.ok) cutCount++;
+        } catch (e) {
+          console.error("Batch cut error", e);
+        }
+      }
+
+      showToast(`Batch cut completed: ${cutCount} clips generated!`, "success");
+      btn.textContent = origText;
+      btn.disabled = false;
+      loadClips();
+    }
+
+    async function exportMomentsFile(filename, format) {
+      try {
+        const res = await fetch("/api/clip/moments/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename, format, timeline_offset: "01:00:00:00" })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (format === "resolve") {
+            showToast(data.message || "DaVinci Resolve export completed", "success");
+            if (data.edl_url) {
+              const a = document.createElement("a");
+              a.href = data.edl_url;
+              a.download = data.edl_filename;
+              a.click();
+            }
+          } else if (data.url) {
+            const a = document.createElement("a");
+            a.href = data.url;
+            a.download = data.filename;
+            a.click();
+            showToast(`Downloaded ${format.toUpperCase()} file: ${data.filename}`, "success");
+          }
+        } else {
+          showToast(data.detail || "Export failed", "error");
+        }
+      } catch (e) {
+        showToast("Error exporting moments: " + e.message, "error");
+      }
+    }
+
     // --- Load Clips ---
     async function loadClips() {
       try {
@@ -1236,6 +1536,7 @@
                 <button type="button" class="btn-secondary" onclick="copyTitle('${c.title.replace(/'/g, "\\'")}')">📋 Copy</button>
                 <button type="button" class="btn-secondary" onclick="revealInFinder('${c.filename}')">🔍 Reveal</button>
                 <button type="button" class="btn-secondary" onclick="toggleTrimDrawer('${c.filename}')">✂ Trim</button>
+                <button type="button" class="btn-secondary" style="border-color: var(--neon-cyan); color: var(--neon-cyan);" onclick="openMomentsDrawer('${c.filename}')">✨ Moments</button>
               </div>
 
               <!-- Interactive Trim Drawer -->
@@ -1266,6 +1567,57 @@
                     <span style="cursor: help; color: #64748b;" title="Cut Accuracy: Fast mode (-c copy) snaps to the nearest keyframe and cuts in ~0.2s without re-encoding. Exact mode re-encodes (H.264/AAC) for frame-accurate cuts.">ℹ️</span>
                   </div>
                   <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="executeTrim('${c.filename}', this)">✂ Cut Trim</button>
+                </div>
+              </div>
+
+              <!-- AI Moments Drawer -->
+              <div id="moments-drawer-${safeId}" class="moments-drawer" style="display: none; margin-top: 10px; padding: 12px; background: #081120; border: 1px solid #1e3a5f; border-radius: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <div style="font-size: 0.8rem; font-weight: 700; color: var(--neon-cyan); display: flex; align-items: center; gap: 6px;">
+                    <span>✨ AI Highlights // Gemini 3.8 Flash</span>
+                  </div>
+                  <div style="font-size: 0.72rem; color: #94a3b8;" id="moments-estimate-${safeId}">Calculating estimate...</div>
+                </div>
+
+                <!-- Estimate & Launch Box -->
+                <div id="moments-start-box-${safeId}" style="margin-bottom: 10px;">
+                  <div style="display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
+                    <input type="text" id="moments-hint-${safeId}" placeholder="Style hint (e.g. funny, car chase, shootout)" style="flex: 2; min-width: 160px; font-size: 0.75rem; padding: 4px 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">
+                    <select id="moments-max-${safeId}" style="padding: 4px 6px; font-size: 0.75rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px;">
+                      <option value="5">Top 5</option>
+                      <option value="10" selected>Top 10</option>
+                      <option value="15">Top 15</option>
+                    </select>
+                    <button type="button" class="btn-primary" style="padding: 4px 12px; font-size: 0.75rem; font-weight: 600;" onclick="startMomentsJob('${c.filename}', this)">✨ Find Best Moments</button>
+                  </div>
+                </div>
+
+                <!-- Progress Bar & Active State -->
+                <div id="moments-progress-box-${safeId}" style="display: none; margin-bottom: 10px;">
+                  <div style="display: flex; justify-content: space-between; font-size: 0.72rem; color: #94a3b8; margin-bottom: 4px;">
+                    <span id="moments-status-text-${safeId}">Analyzing video chunks with Gemini...</span>
+                    <span id="moments-percent-text-${safeId}">0%</span>
+                  </div>
+                  <div style="width: 100%; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
+                    <div id="moments-bar-${safeId}" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink)); transition: width 0.3s;"></div>
+                  </div>
+                  <button type="button" class="btn-danger" style="padding: 2px 8px; font-size: 0.7rem;" onclick="cancelMomentsJob('${safeId}')">Cancel</button>
+                </div>
+
+                <!-- Results & Export Toolbar -->
+                <div id="moments-results-box-${safeId}" style="display: none;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; flex-wrap: wrap; gap: 6px;">
+                    <div style="font-size: 0.75rem; font-weight: 600; color: var(--neon-green);" id="moments-count-${safeId}">Found Highlights</div>
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                      <button type="button" class="btn-clip" style="padding: 2px 8px; font-size: 0.7rem;" onclick="batchCutMoments('${c.filename}', this)">✂ Cut All</button>
+                      <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="exportMomentsFile('${c.filename}', 'edl')">📥 EDL</button>
+                      <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="exportMomentsFile('${c.filename}', 'csv')">📄 CSV</button>
+                      <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.7rem; border-color: #ec4899; color: #ec4899;" onclick="exportMomentsFile('${c.filename}', 'resolve')">🎬 Resolve</button>
+                    </div>
+                  </div>
+                  <div id="moments-list-${safeId}" style="display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto;">
+                    <!-- Rendered moment cards -->
+                  </div>
                 </div>
               </div>
             </div>
