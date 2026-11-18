@@ -95,6 +95,7 @@ import test_clipper
 import test_recording_resilience
 import test_static_ui
 import test_scenarios
+import test_extractor
 
 
 def create_full_suite() -> unittest.TestSuite:
@@ -107,6 +108,7 @@ def create_full_suite() -> unittest.TestSuite:
     suite.addTests(loader.loadTestsFromModule(test_recording_resilience))
     suite.addTests(loader.loadTestsFromModule(test_static_ui))
     suite.addTests(loader.loadTestsFromModule(test_scenarios))
+    suite.addTests(loader.loadTestsFromModule(test_extractor))
 
     return suite
 

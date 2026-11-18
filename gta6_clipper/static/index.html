@@ -537,6 +537,48 @@
     </div>
   </div>
 
+  <!-- Live Stream Timestamp Extractor Panel -->
+  <div class="extractor-panel" style="margin-bottom: 24px; padding: 18px; background: #0b1329; border: 1px solid #1e293b; border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+      <div style="font-weight: 700; font-size: 0.95rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 8px;">
+        <span>🎯 LIVE STREAM TIMESTAMP EXTRACTOR</span>
+        <span style="font-size: 0.75rem; background: #1e293b; color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-weight: normal;">DVR Rewind &amp; VOD Slicer</span>
+      </div>
+      <div style="font-size: 0.75rem; color: #94a3b8;">Extract without waiting for 4-8hr stream to conclude</div>
+    </div>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px;">
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Streamer / Source</label>
+        <select id="extractor-streamer-select" onchange="onExtractorStreamerChange()" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+          <option value="">-- Choose Streamer or Custom URL --</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Live Stream / VOD URL</label>
+        <input type="text" id="extractor-url" placeholder="https://www.youtube.com/@Streamer/live" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Start Timestamp (HH:MM:SS or 15m)</label>
+        <input type="text" id="extractor-start" placeholder="00:15:00" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">End Timestamp or Duration</label>
+        <input type="text" id="extractor-end" placeholder="00:25:00 or +10m" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+      </div>
+    </div>
+    
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+      <input type="text" id="extractor-title" placeholder="Clip Title / Note (optional)" style="flex: 1; min-width: 200px; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+      <button type="button" id="btn-extract-stream" class="btn-primary" onclick="triggerStreamExtract(this)" style="padding: 8px 16px; font-weight: 600;">⚡ Extract Clip</button>
+    </div>
+    
+    <div style="margin-top: 10px; font-size: 0.72rem; color: #64748b; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+      <span>ℹ️ <strong>Usage Notice:</strong> Only clip streams you have permission to record and edit.</span>
+      <span>YouTube live supports rewind buffer (--live-from-start). Twitch/Kick requires active VOD.</span>
+    </div>
+  </div>
+
   <!-- Streamers Cards Grid -->
   <div class="grid-section">
     <div class="section-header">Live Channels & Buffer Feeds</div>
@@ -876,6 +918,24 @@
         masterPollEl.textContent = data.master_polling ? "ON" : "OFF";
         masterPollEl.style.color = data.master_polling ? "var(--neon-green)" : "var(--text-muted)";
 
+        // Populate Extractor Streamer dropdown if not already populated
+        const extractorSelect = document.getElementById("extractor-streamer-select");
+        if (extractorSelect && data.streamers) {
+          const currentVal = extractorSelect.value;
+          const currentCount = extractorSelect.options.length;
+          if (currentCount <= 1 || currentCount !== (data.streamers.length + 1)) {
+            extractorSelect.innerHTML = '<option value="">-- Choose Streamer or Custom URL --</option>';
+            data.streamers.forEach(s => {
+              const opt = document.createElement("option");
+              opt.value = s.id;
+              opt.dataset.url = s.url;
+              opt.textContent = `${s.name} (${s.platform})`;
+              extractorSelect.appendChild(opt);
+            });
+            if (currentVal) extractorSelect.value = currentVal;
+          }
+        }
+
         // Update Streamer Cards in-place
         const container = document.getElementById("streamers-container");
         data.streamers.forEach(s => {
@@ -994,6 +1054,161 @@
       }
     }
 
+    // --- Extractor & Trimmer Handlers ---
+    function onExtractorStreamerChange() {
+      const select = document.getElementById("extractor-streamer-select");
+      const urlInput = document.getElementById("extractor-url");
+      const selected = select.options[select.selectedIndex];
+      if (selected && selected.dataset.url) {
+        urlInput.value = selected.dataset.url;
+      }
+    }
+
+    async function triggerStreamExtract(btn) {
+      const select = document.getElementById("extractor-streamer-select");
+      const urlInput = document.getElementById("extractor-url");
+      const startInput = document.getElementById("extractor-start");
+      const endInput = document.getElementById("extractor-end");
+      const titleInput = document.getElementById("extractor-title");
+
+      const streamerId = select.value || null;
+      const url = urlInput.value.trim() || null;
+      const startTime = startInput.value.trim();
+      const endTimeVal = endInput.value.trim();
+
+      if (!streamerId && !url) {
+        showToast("Please choose a streamer or provide a stream URL", "error");
+        return;
+      }
+      if (!startTime) {
+        showToast("Please specify a start timestamp (e.g. 00:15:00 or 15m)", "error");
+        return;
+      }
+      if (!endTimeVal) {
+        showToast("Please specify an end timestamp or duration (e.g. 00:25:00 or +10m)", "error");
+        return;
+      }
+
+      const payload = {
+        streamer_id: streamerId,
+        url: url,
+        start_time: startTime,
+        title: titleInput.value.trim() || null
+      };
+
+      if (endTimeVal.startsWith("+") || endTimeVal.endsWith("m") || endTimeVal.endsWith("s")) {
+        payload.duration = endTimeVal;
+      } else {
+        payload.end_time = endTimeVal;
+      }
+
+      const origText = btn.textContent;
+      btn.textContent = "⏳ Extracting...";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/api/clip/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`Extracted clip: ${data.clip.title} (${data.clip.duration_sec}s)`, "success");
+          loadClips();
+        } else {
+          showToast(data.detail || "Stream extraction failed", "error");
+        }
+      } catch (err) {
+        showToast("Network error during stream extraction", "error");
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    }
+
+    function toggleTrimDrawer(filename) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const drawer = document.getElementById(`trim-drawer-${safeId}`);
+      if (!drawer) return;
+      drawer.style.display = (drawer.style.display === "none" || !drawer.style.display) ? "block" : "none";
+    }
+
+    function setTrimIn(filename) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const video = document.getElementById(`video-${safeId}`);
+      const input = document.getElementById(`trim-start-${safeId}`);
+      if (video && input) {
+        input.value = video.currentTime.toFixed(1);
+      }
+    }
+
+    function setTrimOut(filename) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const video = document.getElementById(`video-${safeId}`);
+      const input = document.getElementById(`trim-end-${safeId}`);
+      if (video && input) {
+        input.value = video.currentTime.toFixed(1);
+      }
+    }
+
+    function updatePlayheadDisplay(video, filename) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const playheadEl = document.getElementById(`playhead-${safeId}`);
+      if (playheadEl && video) {
+        playheadEl.textContent = `Playhead: ${video.currentTime.toFixed(1)}s`;
+      }
+    }
+
+    async function executeTrim(filename, btn) {
+      const safeId = filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const startInput = document.getElementById(`trim-start-${safeId}`);
+      const endInput = document.getElementById(`trim-end-${safeId}`);
+      const modeSelect = document.getElementById(`trim-mode-${safeId}`);
+
+      const startSec = parseFloat(startInput.value);
+      const endSec = parseFloat(endInput.value);
+      const mode = modeSelect ? modeSelect.value : "fast";
+
+      if (isNaN(startSec) || isNaN(endSec)) {
+        showToast("Start and end seconds must be valid numbers", "error");
+        return;
+      }
+      if (startSec < 0 || endSec <= startSec) {
+        showToast("Start must be >= 0 and less than end", "error");
+        return;
+      }
+
+      const origText = btn.textContent;
+      btn.textContent = "Cutting...";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/api/clip/trim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: filename,
+            start_sec: startSec,
+            end_sec: endSec,
+            mode: mode
+          })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`Trimmed: ${data.clip.title} (${data.clip.duration_sec}s)`, "success");
+          loadClips();
+        } else {
+          showToast(data.detail || "Trim failed", "error");
+        }
+      } catch (err) {
+        showToast("Network error during trim", "error");
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    }
+
     // --- Load Clips ---
     async function loadClips() {
       try {
@@ -1005,9 +1220,11 @@
           container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No clips generated yet.</div>';
           return;
         }
-        container.innerHTML = clips.map(c => `
+        container.innerHTML = clips.map(c => {
+          const safeId = c.filename.replace(/[^a-zA-Z0-9_-]/g, '_');
+          return `
           <div class="clip-card">
-            <video controls preload="metadata" src="${c.url}"></video>
+            <video id="video-${safeId}" controls preload="metadata" src="${c.url}" ontimeupdate="updatePlayheadDisplay(this, '${c.filename}')"></video>
             <div class="clip-details">
               <div class="clip-title" title="${c.title}">${c.title}</div>
               <div class="clip-stats">
@@ -1018,10 +1235,42 @@
                 <a href="${c.url}" download="${c.filename}" class="btn-secondary">⬇ Save</a>
                 <button type="button" class="btn-secondary" onclick="copyTitle('${c.title.replace(/'/g, "\\'")}')">📋 Copy</button>
                 <button type="button" class="btn-secondary" onclick="revealInFinder('${c.filename}')">🔍 Reveal</button>
+                <button type="button" class="btn-secondary" onclick="toggleTrimDrawer('${c.filename}')">✂ Trim</button>
+              </div>
+
+              <!-- Interactive Trim Drawer -->
+              <div id="trim-drawer-${safeId}" class="trim-drawer" style="display: none; margin-top: 10px; padding: 10px; background: #0c1322; border: 1px solid #1e293b; border-radius: 6px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <div style="font-size: 0.78rem; font-weight: 600; color: var(--neon-cyan);">✂ Trim Sub-Clip</div>
+                  <div style="font-size: 0.72rem; color: var(--text-muted);" id="playhead-${safeId}">Playhead: 0.0s</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px;">
+                  <div style="display: flex; gap: 4px; align-items: center;">
+                    <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="setTrimIn('${c.filename}')">[ In</button>
+                    <input type="number" step="0.1" id="trim-start-${safeId}" placeholder="Start (s)" style="width: 100%; font-size: 0.75rem; padding: 3px 6px;" value="0.0">
+                  </div>
+                  <div style="display: flex; gap: 4px; align-items: center;">
+                    <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.7rem;" onclick="setTrimOut('${c.filename}')">Out ]</button>
+                    <input type="number" step="0.1" id="trim-end-${safeId}" placeholder="End (s)" style="width: 100%; font-size: 0.75rem; padding: 3px 6px;" value="${c.duration_sec}">
+                  </div>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
+                  <div style="display: flex; gap: 4px; align-items: center; font-size: 0.75rem;">
+                    <label title="Cut Accuracy: Fast mode (-c copy) snaps to the nearest keyframe and cuts in ~0.2s without re-encoding. Exact mode re-encodes (H.264/AAC) for frame-accurate cuts.">
+                      Mode:
+                      <select id="trim-mode-${safeId}" style="padding: 2px 4px; font-size: 0.72rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px;">
+                        <option value="fast">Fast (-c copy, instant)</option>
+                        <option value="exact">Exact (libx264 re-encode)</option>
+                      </select>
+                    </label>
+                    <span style="cursor: help; color: #64748b;" title="Cut Accuracy: Fast mode (-c copy) snaps to the nearest keyframe and cuts in ~0.2s without re-encoding. Exact mode re-encodes (H.264/AAC) for frame-accurate cuts.">ℹ️</span>
+                  </div>
+                  <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="executeTrim('${c.filename}', this)">✂ Cut Trim</button>
+                </div>
               </div>
             </div>
           </div>
-        `).join("");
+        `}).join("");
       } catch (err) {
         console.error("Clips fetch error", err);
       }
