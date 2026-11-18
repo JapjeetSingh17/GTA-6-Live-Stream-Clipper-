@@ -579,6 +579,70 @@
     </div>
   </div>
 
+  <!-- AI Long-Video Analyser Panel (Phase 2) -->
+  <div class="moments-top-panel" style="margin-bottom: 24px; padding: 18px; background: #081120; border: 1px solid #1e3a5f; border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+      <div style="font-weight: 700; font-size: 0.95rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 8px;">
+        <span>✨ AI LONG-VIDEO ANALYSER // GEMINI 3.8 FLASH</span>
+        <span style="font-size: 0.75rem; background: #1e293b; color: var(--neon-green); padding: 2px 8px; border-radius: 4px; font-weight: normal;">Phase 2 Ready</span>
+      </div>
+      <div style="font-size: 0.75rem; color: #94a3b8;">Find viral moments, export EDL markers, or send to DaVinci Resolve</div>
+    </div>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Select Recorded Clip</label>
+        <select id="top-moments-clip-select" onchange="onTopMomentsClipChange()" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+          <option value="">-- Choose a Clip to Analyze --</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Style Hint (optional)</label>
+        <input type="text" id="top-moments-hint" placeholder="e.g. funny moments, car chase, shootout, stunt" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+      </div>
+      <div>
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Moments to Extract</label>
+        <select id="top-moments-max" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+          <option value="5">Top 5 Highlights</option>
+          <option value="10" selected>Top 10 Highlights</option>
+          <option value="15">Top 15 Highlights</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+      <div id="top-moments-estimate" style="font-size: 0.75rem; color: #94a3b8;">Choose a clip above to view token & chunk estimate</div>
+      <button type="button" id="btn-top-moments-start" class="btn-primary" onclick="startTopMomentsJob(this)" style="padding: 8px 18px; font-weight: 600;">✨ Find Best Moments</button>
+    </div>
+
+    <!-- Top Moments Progress Box -->
+    <div id="top-moments-progress-box" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1e293b;">
+      <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-bottom: 6px;">
+        <span id="top-moments-status-text">Analyzing video chunks with Gemini 3.8 Flash...</span>
+        <span id="top-moments-percent-text">0%</span>
+      </div>
+      <div style="width: 100%; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
+        <div id="top-moments-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--neon-cyan), var(--neon-pink)); transition: width 0.3s;"></div>
+      </div>
+      <button type="button" class="btn-danger" style="padding: 2px 8px; font-size: 0.7rem;" onclick="cancelTopMomentsJob()">Cancel</button>
+    </div>
+
+    <!-- Top Moments Results Box -->
+    <div id="top-moments-results-box" style="display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid #1e293b;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+        <div style="font-size: 0.8rem; font-weight: 700; color: var(--neon-green);" id="top-moments-count">Found Highlights</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="batchCutTopMoments(this)">✂ Cut All Highlights</button>
+          <button type="button" class="btn-secondary" style="padding: 3px 8px; font-size: 0.72rem;" onclick="exportTopMoments('edl')">📥 Export EDL</button>
+          <button type="button" class="btn-secondary" style="padding: 3px 8px; font-size: 0.72rem;" onclick="exportTopMoments('csv')">📄 Export CSV</button>
+          <button type="button" class="btn-secondary" style="padding: 3px 8px; font-size: 0.72rem; border-color: #ec4899; color: #ec4899;" onclick="exportTopMoments('resolve')">🎬 DaVinci Resolve</button>
+        </div>
+      </div>
+      <div id="top-moments-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto;">
+      </div>
+    </div>
+  </div>
+
   <!-- Streamers Cards Grid -->
   <div class="grid-section">
     <div class="section-header">Live Channels & Buffer Feeds</div>
@@ -1509,15 +1573,217 @@
       }
     }
 
+    async function onTopMomentsClipChange() {
+      const select = document.getElementById("top-moments-clip-select");
+      const estEl = document.getElementById("top-moments-estimate");
+      const filename = select.value;
+      if (!filename) {
+        estEl.textContent = "Choose a clip above to view token & chunk estimate";
+        return;
+      }
+      try {
+        const res = await fetch("/api/clip/moments/estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const est = data.estimate;
+          estEl.textContent = `Est: ${est.chunk_count} chunk(s) (${est.duration_hms}) • ~${est.approx_tokens.toLocaleString()} tokens`;
+        }
+      } catch (e) {
+        estEl.textContent = "";
+      }
+    }
+
+    let topMomentsPoller = null;
+
+    async function startTopMomentsJob(btn) {
+      const select = document.getElementById("top-moments-clip-select");
+      const hintInput = document.getElementById("top-moments-hint");
+      const maxSelect = document.getElementById("top-moments-max");
+      const progressBox = document.getElementById("top-moments-progress-box");
+      const resultsBox = document.getElementById("top-moments-results-box");
+
+      const filename = select.value;
+      if (!filename) {
+        showToast("Please choose a clip to analyze first", "error");
+        return;
+      }
+
+      const styleHint = hintInput ? hintInput.value.trim() : null;
+      const maxMoments = maxSelect ? parseInt(maxSelect.value) : 10;
+
+      btn.disabled = true;
+
+      try {
+        const res = await fetch("/api/clip/moments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename,
+            style_hint: styleHint || null,
+            max_moments: maxMoments
+          })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.detail || "Failed to start AI analysis", "error");
+          btn.disabled = false;
+          return;
+        }
+
+        const jobId = data.job_id;
+        if (data.cached) {
+          showToast("Instant cache hit: loaded previously analyzed moments!", "success");
+        }
+
+        progressBox.style.display = "block";
+        resultsBox.style.display = "none";
+        updateTopMomentsProgress(5, "Preparing video proxy for Gemini 3.8 Flash...");
+
+        topMomentsPoller = setInterval(() => pollTopMomentsJob(filename, jobId, btn), 2000);
+
+      } catch (err) {
+        showToast("Network error starting analysis", "error");
+        btn.disabled = false;
+      }
+    }
+
+    async function pollTopMomentsJob(filename, jobId, btn) {
+      try {
+        const res = await fetch(`/api/clip/moments/${jobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+
+        const progressBox = document.getElementById("top-moments-progress-box");
+
+        if (job.status === "running" || job.status === "queued") {
+          const p = job.progress || {};
+          const chunkMsg = p.total_chunks > 1 ? ` (Chunk ${p.current_chunk}/${p.total_chunks})` : "";
+          updateTopMomentsProgress(p.percent || 10, `Analyzing with Gemini 3.8 Flash${chunkMsg}...`);
+        } else if (job.status === "done") {
+          clearInterval(topMomentsPoller);
+          topMomentsPoller = null;
+          progressBox.style.display = "none";
+          if (btn) btn.disabled = false;
+          renderTopMomentsResults(job.results || []);
+          showToast(`Found ${job.results.length} highlight moments!`, "success");
+        } else if (job.status === "error" || job.status === "cancelled") {
+          clearInterval(topMomentsPoller);
+          topMomentsPoller = null;
+          progressBox.style.display = "none";
+          if (btn) btn.disabled = false;
+          showToast(job.error || "Analysis failed", "error");
+        }
+      } catch (e) {
+        console.error("Poll top moments error", e);
+      }
+    }
+
+    function updateTopMomentsProgress(percent, text) {
+      const bar = document.getElementById("top-moments-bar");
+      const txt = document.getElementById("top-moments-status-text");
+      const pct = document.getElementById("top-moments-percent-text");
+      if (bar) bar.style.width = `${percent}%`;
+      if (txt) txt.textContent = text;
+      if (pct) pct.textContent = `${percent}%`;
+    }
+
+    function cancelTopMomentsJob() {
+      if (topMomentsPoller) {
+        clearInterval(topMomentsPoller);
+        topMomentsPoller = null;
+      }
+      const progressBox = document.getElementById("top-moments-progress-box");
+      const btn = document.getElementById("btn-top-moments-start");
+      if (progressBox) progressBox.style.display = "none";
+      if (btn) btn.disabled = false;
+      showToast("Analysis cancelled", "info");
+    }
+
+    function renderTopMomentsResults(moments) {
+      const resultsBox = document.getElementById("top-moments-results-box");
+      const countEl = document.getElementById("top-moments-count");
+      const listEl = document.getElementById("top-moments-list");
+      const select = document.getElementById("top-moments-clip-select");
+      const filename = select ? select.value : "";
+
+      if (!resultsBox || !listEl) return;
+      countEl.textContent = `Found ${moments.length} Highlights for ${filename}`;
+      resultsBox.dataset.moments = JSON.stringify(moments);
+
+      if (moments.length === 0) {
+        listEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.8rem; padding: 10px;">No highlight moments met the criteria.</div>';
+      } else {
+        listEl.innerHTML = moments.map((m, idx) => {
+          const isHigh = m.score >= 8;
+          const scoreColor = isHigh ? "var(--neon-green)" : "var(--neon-yellow)";
+          return `
+            <div style="background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 6px; padding: 8px 12px; font-size: 0.8rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-weight: 700; color: #f1f5f9;">#${idx+1} ${m.title}</span>
+                <span style="color: ${scoreColor}; font-weight: 700; font-size: 0.75rem; border: 1px solid ${scoreColor}; padding: 2px 6px; border-radius: 4px;">
+                  ★ ${m.score}/10
+                </span>
+              </div>
+              <div style="color: #94a3b8; font-size: 0.75rem; margin-bottom: 6px;">${m.reason || ""}</div>
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                <span style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.75rem;">
+                  ${m.start} → ${m.end} (${m.duration_sec}s)
+                </span>
+                <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="cutSingleMoment('${filename}', ${m.start_sec}, ${m.end_sec}, '${m.title.replace(/'/g, "\\'")}', this)">⚡ Cut Sub-Clip</button>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+      resultsBox.style.display = "block";
+    }
+
+    async function batchCutTopMoments(btn) {
+      const select = document.getElementById("top-moments-clip-select");
+      const filename = select ? select.value : "";
+      if (!filename) return;
+      await batchCutMoments(filename, btn);
+    }
+
+    async function exportTopMoments(format) {
+      const select = document.getElementById("top-moments-clip-select");
+      const filename = select ? select.value : "";
+      if (!filename) {
+        showToast("Please choose a clip first", "error");
+        return;
+      }
+      await exportMomentsFile(filename, format);
+    }
+
     // --- Load Clips ---
     async function loadClips() {
       try {
         const res = await fetch("/api/clips");
         if (!res.ok) return;
         const clips = await res.json();
+
+        // Populate top moments clip select
+        const topSelect = document.getElementById("top-moments-clip-select");
+        if (topSelect) {
+          const currentVal = topSelect.value;
+          topSelect.innerHTML = '<option value="">-- Choose a Clip to Analyze --</option>';
+          clips.forEach(c => {
+            const opt = document.createElement("option");
+            opt.value = c.filename;
+            opt.textContent = `${c.title} (${c.duration_sec}s)`;
+            topSelect.appendChild(opt);
+          });
+          if (currentVal) topSelect.value = currentVal;
+        }
+
         const container = document.getElementById("clips-container");
         if (!clips || clips.length === 0) {
-          container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No clips generated yet.</div>';
+          container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem; padding: 12px; background: var(--bg-card); border-radius: var(--radius); border: 1px dashed var(--border);">No clips generated yet. Record or extract a clip above, then click ✨ Moments on its card to analyze highlights with Gemini 3.8 Flash!</div>';
           return;
         }
         container.innerHTML = clips.map(c => {
