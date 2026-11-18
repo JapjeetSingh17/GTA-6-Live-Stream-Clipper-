@@ -1,0 +1,30 @@
+{
+  "ishowspeed": {
+    "id": "ishowspeed",
+    "name": "IShowSpeed",
+    "platform": "youtube",
+    "url": "https://www.youtube.com/@IShowSpeed/live",
+    "enabled": true
+  },
+  "carryislive": {
+    "id": "carryislive",
+    "name": "CarryisLive",
+    "platform": "youtube",
+    "url": "https://www.youtube.com/@CarryisLive/live",
+    "enabled": true
+  },
+  "snowleopard_1527": {
+    "id": "snowleopard_1527",
+    "name": "Snow Leopard",
+    "platform": "twitch",
+    "url": "https://www.twitch.tv/snowleopard_1527",
+    "enabled": true
+  },
+  "dynamicjatt": {
+    "id": "dynamicjatt",
+    "name": "Dynamic Jatt",
+    "platform": "youtube",
+    "url": "https://www.youtube.com/@DynamicJatt/live",
+    "enabled": true
+  }
+}

@@ -1,0 +1,23 @@
+# Environments
+.venv/
+gta6_clipper/.venv/
+venv/
+ENV/
+
+# Temporary video streams, clips, and logs
+gta6_clipper/streams/
+gta6_clipper/clips/
+gta6_clipper/logs/
+*.ts
+*.mp4
+*.pid
+*.log
+
+# Personal/Scratch directories
+channel/
+
+# Python cache & OS metadata
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

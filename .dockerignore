@@ -1,0 +1,9 @@
+.venv/
+gta6_clipper/.venv/
+gta6_clipper/streams/
+gta6_clipper/clips/
+gta6_clipper/logs/
+__pycache__/
+*.pyc
+.git/
+.DS_Store
