@@ -159,9 +159,14 @@ def analyse_chunk_gemini(
             time.sleep(2)
 
         # 3. Construct prompt & configuration
-        # NOTE: Gemini 3.8 Flash: Do NOT send temperature, top_p, top_k.
-        # Use thinking_level ("low" or "medium")
-        tc = types.ThinkingConfig(thinking_level=thinking_level if thinking_level in ("low", "medium") else "low")
+        # NOTE: Gemini Flash Thinking: Support both thinking_budget and thinking_level
+        tc_kwargs = {}
+        if hasattr(types, "ThinkingConfig") and hasattr(types.ThinkingConfig, "model_fields"):
+            if "thinking_budget" in types.ThinkingConfig.model_fields:
+                tc_kwargs["thinking_budget"] = 1024
+            elif "thinking_level" in types.ThinkingConfig.model_fields:
+                tc_kwargs["thinking_level"] = thinking_level if thinking_level in ("low", "medium") else "low"
+        tc = types.ThinkingConfig(**tc_kwargs) if tc_kwargs else None
         cfg = types.GenerateContentConfig(
             thinking_config=tc,
             response_mime_type="application/json",

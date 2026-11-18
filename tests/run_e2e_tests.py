@@ -98,6 +98,7 @@ import test_scenarios
 import test_extractor
 import test_moments
 import test_auth
+import test_openrouter
 
 
 def create_full_suite() -> unittest.TestSuite:
@@ -113,6 +114,7 @@ def create_full_suite() -> unittest.TestSuite:
     suite.addTests(loader.loadTestsFromModule(test_extractor))
     suite.addTests(loader.loadTestsFromModule(test_moments))
     suite.addTests(loader.loadTestsFromModule(test_auth))
+    suite.addTests(loader.loadTestsFromModule(test_openrouter))
 
     return suite
 

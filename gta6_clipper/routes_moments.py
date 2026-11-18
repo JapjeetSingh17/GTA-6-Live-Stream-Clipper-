@@ -31,6 +31,10 @@ from gta6_clipper.moments import (
     save_cached_moments,
     split_chunks,
 )
+from gta6_clipper.openrouter import (
+    get_openrouter_api_key,
+    get_openrouter_model,
+)
 from gta6_clipper.resolve_export import export_moments
 
 logger = logging.getLogger("gta6_clipper.routes_moments")
@@ -47,7 +51,10 @@ class EstimateRequest(BaseModel):
 
 
 class MomentsRequest(BaseModel):
-    filename: str
+    filename: Optional[str] = None
+    url: Optional[str] = None
+    streamer_id: Optional[str] = None
+    engine: Literal["gemini", "openrouter"] = "gemini"
     max_moments: int = DEFAULT_MAX_MOMENTS
     min_len: float = 15.0
     max_len: float = 60.0
@@ -80,12 +87,83 @@ async def start_moments_analysis(body: MomentsRequest):
     global ACTIVE_JOB_ID
     from gta6_clipper.app import sanitize_clip_path
 
-    # 1. Validate filename
+    job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    params = {
+        "max_moments": body.max_moments,
+        "min_len": body.min_len,
+        "max_len": body.max_len,
+        "style_hint": body.style_hint.strip() if body.style_hint else None,
+    }
+
+    # OpenRouter Engine Flow
+    if body.engine == "openrouter":
+        openrouter_key = get_openrouter_api_key()
+        if not openrouter_key:
+            raise HTTPException(
+                status_code=400,
+                detail="OPENROUTER_API_KEY environment variable is not configured. Set it in your environment or Railway variables.",
+            )
+
+        from gta6_clipper.app import (
+            DEFAULT_STREAMERS,
+            STREAMERS_FILE,
+            load_json_safe,
+            streamers_lock,
+            validate_stream_url,
+        )
+
+        target_url = None
+        target_name = "stream_highlights"
+        if body.url:
+            validate_stream_url(body.url)
+            target_url = body.url
+            target_name = body.url
+        elif body.streamer_id:
+            streamers = load_json_safe(STREAMERS_FILE, DEFAULT_STREAMERS, streamers_lock)
+            if body.streamer_id not in streamers:
+                raise HTTPException(status_code=404, detail=f"Streamer '{body.streamer_id}' not found in roster")
+            target_url = streamers[body.streamer_id].get("url")
+            target_name = streamers[body.streamer_id].get("name", body.streamer_id)
+        elif body.filename:
+            file_path = sanitize_clip_path(body.filename)
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail="Clip not found")
+            target_name = body.filename
+        else:
+            raise HTTPException(status_code=400, detail="Provide a stream URL, streamer_id, or recorded clip")
+
+        async with JOB_LOCK:
+            if ACTIVE_JOB_ID and ACTIVE_JOB_ID in JOBS and JOBS[ACTIVE_JOB_ID].get("status") in ("queued", "running"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Another video analysis job is currently in progress. Please wait for it to complete or cancel it.",
+                )
+            ACTIVE_JOB_ID = job_id
+
+        JOBS[job_id] = {
+            "job_id": job_id,
+            "filename": target_name,
+            "url": target_url,
+            "engine": "openrouter",
+            "status": "queued",
+            "progress": {"current_chunk": 0, "total_chunks": 1, "percent": 0},
+            "results": [],
+            "is_cached": False,
+            "error": None,
+            "created_at": datetime.now().isoformat(),
+        }
+
+        asyncio.create_task(_run_openrouter_job(job_id, target_url, body.filename, params, openrouter_key))
+        return {"status": "ok", "job_id": job_id, "cached": False}
+
+    # Gemini Engine Flow (Direct Video)
+    if not body.filename:
+        raise HTTPException(status_code=400, detail="Gemini video engine requires a recorded clip filename")
+
     file_path = sanitize_clip_path(body.filename)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Clip not found")
 
-    # 2. Check API key presence (Never leak or log the key)
     api_key = get_gemini_api_key()
     if not api_key:
         raise HTTPException(
@@ -93,20 +171,12 @@ async def start_moments_analysis(body: MomentsRequest):
             detail="GEMINI_API_KEY environment variable is not configured. Set it in your environment or .env file.",
         )
 
-    # 3. Check sidecar cache first (instant hit)
-    params = {
-        "max_moments": body.max_moments,
-        "min_len": body.min_len,
-        "max_len": body.max_len,
-        "style_hint": body.style_hint.strip() if body.style_hint else None,
-    }
     cached = load_cached_moments(file_path, get_gemini_model(), params)
-    job_id = f"job_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-
     if cached is not None:
         JOBS[job_id] = {
             "job_id": job_id,
             "filename": body.filename,
+            "engine": "gemini",
             "status": "done",
             "progress": {"current_chunk": 1, "total_chunks": 1, "percent": 100},
             "results": cached,
@@ -116,7 +186,6 @@ async def start_moments_analysis(body: MomentsRequest):
         }
         return {"status": "ok", "job_id": job_id, "cached": True}
 
-    # 4. Limit to ONE running job at a time
     async with JOB_LOCK:
         if ACTIVE_JOB_ID and ACTIVE_JOB_ID in JOBS and JOBS[ACTIVE_JOB_ID].get("status") in ("queued", "running"):
             raise HTTPException(
@@ -125,10 +194,10 @@ async def start_moments_analysis(body: MomentsRequest):
             )
         ACTIVE_JOB_ID = job_id
 
-    # 5. Initialize job record and launch background task
     JOBS[job_id] = {
         "job_id": job_id,
         "filename": body.filename,
+        "engine": "gemini",
         "status": "queued",
         "progress": {"current_chunk": 0, "total_chunks": 1, "percent": 0},
         "results": [],
@@ -139,6 +208,64 @@ async def start_moments_analysis(body: MomentsRequest):
 
     asyncio.create_task(_run_moments_job(job_id, file_path, params, api_key))
     return {"status": "ok", "job_id": job_id, "cached": False}
+
+
+async def _run_openrouter_job(job_id: str, url: Optional[str], filename: Optional[str], params: Dict, api_key: str):
+    """Background processor for OpenRouter caption-based highlights."""
+    global ACTIVE_JOB_ID
+    from gta6_clipper.openrouter import (
+        fetch_stream_transcript,
+        parse_vtt_to_timestamped_text,
+        analyse_transcript_openrouter,
+    )
+
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"gta6_openrouter_{job_id}_"))
+    job = JOBS[job_id]
+    job["status"] = "running"
+    job["progress"]["percent"] = 15
+
+    try:
+        transcript_text = ""
+        if url:
+            job["progress"]["percent"] = 30
+            vtt_path = await asyncio.to_thread(fetch_stream_transcript, url, temp_dir)
+            if not vtt_path or not vtt_path.exists():
+                raise RuntimeError("Could not find auto-generated or official subtitles for this stream. Ensure the stream or VOD has captions available.")
+            job["progress"]["percent"] = 55
+            transcript_text = await asyncio.to_thread(parse_vtt_to_timestamped_text, vtt_path)
+        else:
+            raise RuntimeError("OpenRouter free highlight extraction requires a YouTube Live or VOD URL with captions.")
+
+        if not transcript_text or len(transcript_text.strip()) < 50:
+            raise RuntimeError("Stream transcript was empty or unavailable.")
+
+        job["progress"]["percent"] = 75
+        moments = await asyncio.to_thread(
+            analyse_transcript_openrouter,
+            api_key,
+            transcript_text,
+            max_moments=params.get("max_moments", 15),
+            style_hint=params.get("style_hint"),
+        )
+
+        job["progress"]["percent"] = 100
+        job["status"] = "done"
+        job["results"] = moments
+
+    except Exception as e:
+        logger.error(f"OpenRouter job {job_id} error: {e}")
+        safe_msg = str(e)
+        if "api_key" in safe_msg.lower() or "bearer" in safe_msg.lower() or "401" in safe_msg:
+            safe_msg = "OpenRouter API key error. Please check your OPENROUTER_API_KEY."
+        job["status"] = "error"
+        job["error"] = safe_msg
+
+    finally:
+        async with JOB_LOCK:
+            if ACTIVE_JOB_ID == job_id:
+                ACTIVE_JOB_ID = None
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 async def _run_moments_job(job_id: str, file_path: Path, params: Dict, api_key: str):

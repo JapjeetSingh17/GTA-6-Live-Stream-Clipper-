@@ -580,20 +580,31 @@
     </div>
   </div>
 
-  <!-- AI Long-Video Analyser Panel (Phase 2) -->
+  <!-- AI Long-Video Analyser Panel (Phase 2 & OpenRouter Integration) -->
   <div class="moments-top-panel" style="margin-bottom: 24px; padding: 18px; background: #081120; border: 1px solid #1e3a5f; border-radius: var(--radius); box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
       <div style="font-weight: 700; font-size: 0.95rem; color: var(--neon-cyan); display: flex; align-items: center; gap: 8px;">
-        <span>✨ AI LONG-VIDEO ANALYSER // GEMINI 3.8 FLASH</span>
-        <span style="font-size: 0.75rem; background: #1e293b; color: var(--neon-green); padding: 2px 8px; border-radius: 4px; font-weight: normal;">Phase 2 Ready</span>
+        <span>✨ AI HIGHLIGHT ENGINE</span>
+        <span style="font-size: 0.72rem; background: #1e293b; color: var(--neon-green); padding: 2px 8px; border-radius: 4px; font-weight: normal;">Dual Engine</span>
       </div>
-      <div style="font-size: 0.75rem; color: #94a3b8;">Find viral moments, export EDL markers, or send to DaVinci Resolve</div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <label for="top-moments-engine" style="font-size: 0.75rem; color: #94a3b8;">Engine:</label>
+        <select id="top-moments-engine" onchange="onMomentsEngineChange()" style="padding: 4px 8px; font-size: 0.75rem; background: var(--surface); border: 1px solid #38bdf8; border-radius: 4px; color: var(--neon-cyan); font-weight: 600;">
+          <option value="openrouter" selected>OpenRouter Free (:free models / $0.00)</option>
+          <option value="gemini">Gemini 3.8 Flash (Direct Video)</option>
+        </select>
+      </div>
     </div>
     
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
-      <div>
+      <div id="wrapper-openrouter-url">
+        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Live Stream or VOD URL (6-8h Streams)</label>
+        <input type="text" id="top-moments-url" placeholder="https://www.youtube.com/watch?v=... or @Streamer/live" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
+      </div>
+
+      <div id="wrapper-clip-select">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-          <label style="font-size: 0.75rem; color: #94a3b8;">Select Recorded Clip</label>
+          <label style="font-size: 0.75rem; color: #94a3b8;">Or Select Recorded Clip</label>
           <div style="display: flex; gap: 6px;">
             <button type="button" class="btn-clip" style="padding: 1px 7px; font-size: 0.7rem;" onclick="document.getElementById('clip-upload-input').click()" title="Upload an MP4 from your Mac">📁 Upload MP4</button>
             <button type="button" class="btn-clip" style="padding: 1px 7px; font-size: 0.7rem;" onclick="generateSampleDemoClip(this)" title="Create a 30s test clip instantly">🎬 Test Clip</button>
@@ -604,22 +615,24 @@
         </select>
         <input type="file" id="clip-upload-input" accept="video/mp4" style="display: none;" onchange="handleClipFileUpload(this)">
       </div>
+
       <div>
         <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Style Hint (optional)</label>
         <input type="text" id="top-moments-hint" placeholder="e.g. funny moments, car chase, shootout, stunt" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
       </div>
+
       <div>
         <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Moments to Extract</label>
         <select id="top-moments-max" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
           <option value="5">Top 5 Highlights</option>
-          <option value="10" selected>Top 10 Highlights</option>
-          <option value="15">Top 15 Highlights</option>
+          <option value="10">Top 10 Highlights</option>
+          <option value="15" selected>Top 15 Highlights</option>
         </select>
       </div>
     </div>
 
     <div style="display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
-      <div id="top-moments-estimate" style="font-size: 0.75rem; color: #94a3b8;">Choose a clip above to view token & chunk estimate</div>
+      <div id="top-moments-estimate" style="font-size: 0.75rem; color: #38bdf8;">✨ OpenRouter Free Mode: 100% Free ($0.00) • Fast timestamped caption analysis for 6-8h streams</div>
       <button type="button" id="btn-top-moments-start" class="btn-primary" onclick="startTopMomentsJob(this)" style="padding: 8px 18px; font-weight: 600;">✨ Find Best Moments</button>
     </div>
 
@@ -1687,35 +1700,63 @@
       }
     }
 
+    function onMomentsEngineChange() {
+      const engine = document.getElementById("top-moments-engine").value;
+      const estEl = document.getElementById("top-moments-estimate");
+      const urlWrapper = document.getElementById("wrapper-openrouter-url");
+      if (engine === "openrouter") {
+        estEl.textContent = "✨ OpenRouter Free Mode: 100% Free ($0.00) • Fast timestamped caption analysis for 6-8h streams";
+        estEl.style.color = "#38bdf8";
+        if (urlWrapper) urlWrapper.style.display = "block";
+      } else {
+        estEl.style.color = "#94a3b8";
+        if (urlWrapper) urlWrapper.style.display = "none";
+        onTopMomentsClipChange();
+      }
+    }
+
     let topMomentsPoller = null;
 
     async function startTopMomentsJob(btn) {
+      const engineSelect = document.getElementById("top-moments-engine");
+      const engine = engineSelect ? engineSelect.value : "openrouter";
       const select = document.getElementById("top-moments-clip-select");
+      const urlInput = document.getElementById("top-moments-url");
       const hintInput = document.getElementById("top-moments-hint");
       const maxSelect = document.getElementById("top-moments-max");
       const progressBox = document.getElementById("top-moments-progress-box");
       const resultsBox = document.getElementById("top-moments-results-box");
 
-      const filename = select.value;
-      if (!filename) {
-        showToast("Please choose a clip to analyze first", "error");
+      const streamUrl = urlInput ? urlInput.value.trim() : "";
+      const filename = select ? select.value : "";
+
+      if (engine === "gemini" && !filename) {
+        showToast("Gemini direct video requires selecting or uploading a clip first", "error");
+        return;
+      }
+      if (engine === "openrouter" && !streamUrl && !filename) {
+        showToast("Paste a YouTube Stream/VOD URL or choose a recorded clip", "error");
         return;
       }
 
       const styleHint = hintInput ? hintInput.value.trim() : null;
-      const maxMoments = maxSelect ? parseInt(maxSelect.value) : 10;
+      const maxMoments = maxSelect ? parseInt(maxSelect.value) : 15;
 
       btn.disabled = true;
 
       try {
+        const payload = {
+          engine,
+          style_hint: styleHint || null,
+          max_moments: maxMoments,
+        };
+        if (streamUrl) payload.url = streamUrl;
+        if (filename) payload.filename = filename;
+
         const res = await fetch("/api/clip/moments", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filename,
-            style_hint: styleHint || null,
-            max_moments: maxMoments
-          })
+          body: JSON.stringify(payload)
         });
         const data = await res.json();
 
@@ -1732,9 +1773,12 @@
 
         progressBox.style.display = "block";
         resultsBox.style.display = "none";
-        updateTopMomentsProgress(5, "Preparing video proxy for Gemini 3.8 Flash...");
+        const statusMsg = engine === "openrouter"
+          ? "Extracting stream captions & querying OpenRouter Free LLM..."
+          : "Analyzing video chunks with Gemini 3.8 Flash...";
+        updateTopMomentsProgress(10, statusMsg);
 
-        topMomentsPoller = setInterval(() => pollTopMomentsJob(filename, jobId, btn), 2000);
+        topMomentsPoller = setInterval(() => pollTopMomentsJob(filename || streamUrl, jobId, btn), 2000);
 
       } catch (err) {
         showToast("Network error starting analysis", "error");
@@ -1794,12 +1838,38 @@
       showToast("Analysis cancelled", "info");
     }
 
+    function cutOrExtractMoment(startSec, endSec, startHms, endHms, title, btn) {
+      const urlInput = document.getElementById("top-moments-url");
+      const select = document.getElementById("top-moments-clip-select");
+      const streamUrl = urlInput ? urlInput.value.trim() : "";
+      const filename = select ? select.value : "";
+
+      if (filename) {
+        cutSingleMoment(filename, startSec, endSec, title, btn);
+      } else if (streamUrl) {
+        const extUrl = document.getElementById("extract-url");
+        const extStart = document.getElementById("extract-start");
+        const extEnd = document.getElementById("extract-end");
+        const extTitle = document.getElementById("extract-title");
+        if (extUrl) extUrl.value = streamUrl;
+        if (extStart) extStart.value = startHms;
+        if (extEnd) extEnd.value = endHms;
+        if (extTitle) extTitle.value = title;
+        showToast(`Loaded moment [${startHms} - ${endHms}] into Extractor above! Click "Extract Clip" to cut.`, "info");
+        const extPanel = document.querySelector(".extractor-panel");
+        if (extPanel) extPanel.scrollIntoView({ behavior: "smooth" });
+      } else {
+        showToast("Please choose a clip or stream URL", "error");
+      }
+    }
+
     function renderTopMomentsResults(moments) {
       const resultsBox = document.getElementById("top-moments-results-box");
       const countEl = document.getElementById("top-moments-count");
       const listEl = document.getElementById("top-moments-list");
       const select = document.getElementById("top-moments-clip-select");
-      const filename = select ? select.value : "";
+      const urlInput = document.getElementById("top-moments-url");
+      const filename = (select && select.value) ? select.value : (urlInput ? urlInput.value : "");
 
       if (!resultsBox || !listEl) return;
       countEl.textContent = `Found ${moments.length} Highlights for ${filename}`;
@@ -1824,7 +1894,7 @@
                 <span style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.75rem;">
                   ${m.start} → ${m.end} (${m.duration_sec}s)
                 </span>
-                <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="cutSingleMoment('${filename}', ${m.start_sec}, ${m.end_sec}, '${m.title.replace(/'/g, "\\'")}', this)">⚡ Cut Sub-Clip</button>
+                <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="cutOrExtractMoment(${m.start_sec}, ${m.end_sec}, '${m.start}', '${m.end}', '${m.title.replace(/'/g, "\\'")}', this)">⚡ Cut / Extract Moment</button>
               </div>
             </div>
           `;
