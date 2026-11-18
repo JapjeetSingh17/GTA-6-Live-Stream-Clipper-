@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "gta6_clipper/**"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
