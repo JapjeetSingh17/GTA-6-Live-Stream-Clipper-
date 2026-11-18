@@ -22,7 +22,12 @@ from gta6_clipper.extractor import format_seconds_to_hms, parse_time_offset
 logger = logging.getLogger("gta6_clipper.openrouter")
 
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_OPENROUTER_MODEL = "google/gemini-2.0-flash-exp:free"
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3.5-lightning:free"
+FALLBACK_FREE_MODELS = [
+    "nvidia/nemotron-3.5-lightning:free",
+    "liquid/lfm-3-1.7b:free",
+    "inclusionai/ling-3.2-flash:free",
+]
 
 HYPE_PATTERN = re.compile(
     r"\b(omg|wtf|lmao|lol|pog|poggers|kekw|holy|sh[i*]t|crazy|nooo+|rip|dead|w\b|l\b|clutch|hacker|insane|stunt|police|busted|aimbot|bussin|fire|wth|damn|no way|sheesh|clip)\b|[💀🔥😂😱🤣💥🚨]",
@@ -324,46 +329,56 @@ def call_openrouter_chat(
 ) -> str:
     """
     Send standard OpenAI-compatible Chat Completion request to OpenRouter.
+    Includes automated fallback across active free models if one is retired or rate-limited.
     """
-    target_model = model or get_openrouter_model()
+    primary_model = model or get_openrouter_model()
+    models_to_try = [primary_model] + [m for m in FALLBACK_FREE_MODELS if m != primary_model]
 
-    payload = {
-        "model": target_model,
-        "messages": [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": prompt},
-        ],
-        "response_format": {"type": "json_object"},
-    }
+    last_error = None
+    for target_model in models_to_try:
+        payload = {
+            "model": target_model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
 
-    req_data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        OPENROUTER_ENDPOINT,
-        data=req_data,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://gta6-live-stream-clipper-production.up.railway.app",
-            "X-Title": "GTA6-ZeroHour Stream Clipper",
-            "Content-Type": "application/json",
-            "User-Agent": "GTA6-ZeroHour/2.0",
-        },
-        method="POST",
-    )
+        req_data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            OPENROUTER_ENDPOINT,
+            data=req_data,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://gta6-live-stream-clipper-production.up.railway.app",
+                "X-Title": "GTA6-ZeroHour Stream Clipper",
+                "Content-Type": "application/json",
+                "User-Agent": "GTA6-ZeroHour/2.0",
+            },
+            method="POST",
+        )
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_sec) as response:
-            resp_body = response.read().decode("utf-8")
-            data = json.loads(resp_body)
-            choices = data.get("choices", [])
-            if choices and "message" in choices[0]:
-                return choices[0]["message"].get("content", "")
-            raise ValueError(f"OpenRouter response missing choices: {resp_body[:200]}")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec) as response:
+                resp_body = response.read().decode("utf-8")
+                data = json.loads(resp_body)
+                choices = data.get("choices", [])
+                if choices and "message" in choices[0]:
+                    return choices[0]["message"].get("content", "")
+                raise ValueError(f"OpenRouter response missing choices: {resp_body[:200]}")
 
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"OpenRouter API error (HTTP {e.code}): {error_body[:250]}")
-    except Exception as e:
-        raise RuntimeError(f"OpenRouter connection failed: {e}")
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8", errors="ignore")
+            last_error = f"OpenRouter API error (HTTP {e.code}) with {target_model}: {error_body[:250]}"
+            logger.warning(f"Model {target_model} failed (HTTP {e.code}), trying next fallback...")
+            continue
+        except Exception as e:
+            last_error = f"OpenRouter connection failed with {target_model}: {e}"
+            logger.warning(f"Connection error with {target_model}: {e}, trying next fallback...")
+            continue
+
+    raise RuntimeError(last_error or "All OpenRouter models failed")
 
 
 def analyse_transcript_openrouter(
