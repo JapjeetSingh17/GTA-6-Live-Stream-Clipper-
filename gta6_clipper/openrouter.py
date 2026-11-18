@@ -116,7 +116,7 @@ def fetch_stream_transcript(url: str, temp_dir: Path) -> Optional[Path]:
     return None
 
 
-def fetch_stream_live_chat(url: str, temp_dir: Path, timeout_sec: int = 45) -> Optional[Path]:
+def fetch_stream_live_chat(url: str, temp_dir: Path, timeout_sec: int = 90) -> Optional[Path]:
     """
     Extract YouTube live chat replay JSON using yt-dlp without downloading video.
     Returns path to downloaded .live_chat.json or .part file, or None if no chat replay is available.
@@ -156,10 +156,116 @@ def fetch_stream_live_chat(url: str, temp_dir: Path, timeout_sec: int = 45) -> O
     return None
 
 
+def fetch_stream_community_highlights(url: str, temp_dir: Optional[Path] = None, timeout_sec: int = 25) -> List[Dict]:
+    """
+    Extract viewer timestamp comments, video chapters, and description timestamps
+    using yt-dlp metadata. Provides high-confidence moment candidates across 6-8+ hour streams.
+    """
+    yt_dlp_bin = shutil.which("yt-dlp")
+    if not yt_dlp_bin:
+        return []
+
+    cmd = [
+        yt_dlp_bin,
+        "--skip-download",
+        "--write-comments",
+        "--dump-json",
+        "--no-warnings",
+        url,
+    ]
+
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
+        if proc.returncode != 0:
+            return []
+        data = json.loads(proc.stdout)
+    except Exception as e:
+        logger.warning(f"Error extracting community timestamps: {e}")
+        return []
+
+    candidates = []
+    ts_pattern = re.compile(r'(?:(\d{1,2}):)?(\d{1,2}):(\d{2})')
+
+    # 1. Parse comments
+    for c in data.get("comments", []) or []:
+        text = c.get("text", "")
+        author = c.get("author", "viewer")
+        for m in ts_pattern.finditer(text):
+            raw_ts = m.group(0)
+            parts = [int(p) for p in raw_ts.split(":")]
+            if len(parts) == 2:
+                sec = parts[0] * 60 + parts[1]
+            elif len(parts) == 3:
+                sec = parts[0] * 3600 + parts[1] * 60 + parts[2]
+            else:
+                continue
+            if sec > 0:
+                candidates.append({
+                    "start": format_seconds_to_hms(sec),
+                    "end": format_seconds_to_hms(sec + 45),
+                    "start_sec": float(sec),
+                    "end_sec": float(sec + 45),
+                    "duration_sec": 45.0,
+                    "raw_score": 300.0,
+                    "msgs": 50,
+                    "hype": 50,
+                    "samples": [f"@{author} (viewer timestamp): {text.strip()[:120]}"],
+                    "source": "community_timestamp",
+                })
+
+    # 2. Parse chapters if present
+    for ch in data.get("chapters", []) or []:
+        start_t = ch.get("start_time")
+        title = ch.get("title", "Chapter")
+        if start_t is not None and start_t > 0:
+            candidates.append({
+                "start": format_seconds_to_hms(start_t),
+                "end": format_seconds_to_hms(start_t + 45),
+                "start_sec": float(start_t),
+                "end_sec": float(start_t + 45),
+                "duration_sec": 45.0,
+                "raw_score": 250.0,
+                "msgs": 30,
+                "hype": 30,
+                "samples": [f"Stream Chapter: {title}"],
+                "source": "chapter",
+            })
+
+    # 3. Parse description timestamps
+    desc = data.get("description", "") or ""
+    for line in desc.splitlines():
+        match = ts_pattern.search(line)
+        if match:
+            raw_ts = match.group(0)
+            parts = [int(p) for p in raw_ts.split(":")]
+            if len(parts) == 2:
+                sec = parts[0] * 60 + parts[1]
+            elif len(parts) == 3:
+                sec = parts[0] * 3600 + parts[1] * 60 + parts[2]
+            else:
+                continue
+            if sec > 0:
+                candidates.append({
+                    "start": format_seconds_to_hms(sec),
+                    "end": format_seconds_to_hms(sec + 45),
+                    "start_sec": float(sec),
+                    "end_sec": float(sec + 45),
+                    "duration_sec": 45.0,
+                    "raw_score": 250.0,
+                    "msgs": 30,
+                    "hype": 30,
+                    "samples": [f"Description marker: {line.strip()[:100]}"],
+                    "source": "description",
+                })
+
+    return candidates
+
+
 def parse_live_chat_excitement(
     chat_path: Path,
     window_sec: int = 35,
     top_k: int = 15,
+    min_separation_sec: int = 180,
 ) -> List[Dict]:
     """
     Parse YouTube .live_chat.json files, aggregate viewer chat velocity & hype words
@@ -255,7 +361,7 @@ def parse_live_chat_excitement(
 
     selected_peaks = []
     for win in scored_windows:
-        overlap = any(abs(win["start_sec"] - p["start_sec"]) < window_sec for p in selected_peaks)
+        overlap = any(abs(win["start_sec"] - p["start_sec"]) < min_separation_sec for p in selected_peaks)
         if not overlap:
             selected_peaks.append(win)
             if len(selected_peaks) >= top_k:
@@ -502,9 +608,13 @@ def analyse_chat_spikes_openrouter(
 
     system_instruction = (
         "You are an elite gaming stream editor and viral video curator specializing in Grand Theft Auto (GTA). "
-        "You are given candidate highlight timestamps extracted from massive viewer live chat excitement explosions. "
+        "You are given candidate highlight timestamps extracted from massive viewer live chat excitement explosions and community reactions. "
         "For each peak timestamp window, analyze the viewer chat reactions (shouting, memes, laughter, shock) "
         "and determine what in-game event caused the reaction. "
+        "CRITICAL REQUIREMENTS:\n"
+        "1. Prioritize ACTUAL GAMEPLAY action (GTA 6 missions, car chases, shootouts, funny fails, crazy glitches, and major story events) "
+        "over pre-stream waiting screens, intro banter, or countdown screens.\n"
+        "2. Ensure selected moments represent highlights spread across the stream rather than clustered in the intro.\n"
         "Generate a punchy, click-worthy viral title, a viral score from 1 to 10, and a 1-sentence reason. "
         "You MUST output valid JSON matching this schema:\n"
         "{\n"

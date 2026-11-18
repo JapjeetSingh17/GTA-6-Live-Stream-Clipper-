@@ -195,13 +195,15 @@ def extract_stream_section(url: str, start_sec: float, end_sec: float, output_pa
         "--no-part",
         "--force-keyframes-at-cuts",
         "--download-sections", section_spec,
+        "-S", "res:1080,fps:60",
+        "-f", "bv*[height<=1080]+ba/b[height<=1080]/best",
+        "--merge-output-format", "mp4",
     ]
 
-    # YouTube live streams and VODs: use mobile player clients and node JS runtime
+    # YouTube live streams and VODs: use node JS runtime and cookies
     if "youtube.com" in url or "youtu.be" in url:
         cmd.extend([
             "--js-runtimes", "node",
-            "--extractor-args", "youtube:player_client=ios,android,web",
             "--live-from-start",
         ])
         cwd_cookie = Path.cwd() / "cookies.txt"

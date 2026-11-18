@@ -218,6 +218,7 @@ async def _run_openrouter_job(job_id: str, url: Optional[str], filename: Optiona
         parse_vtt_to_timestamped_text,
         analyse_transcript_openrouter,
         fetch_stream_live_chat,
+        fetch_stream_community_highlights,
         parse_live_chat_excitement,
         analyse_chat_spikes_openrouter,
     )
@@ -254,32 +255,45 @@ async def _run_openrouter_job(job_id: str, url: Optional[str], filename: Optiona
             )
             detection_source = "captions"
         else:
-            # Step 2: Fallback to Live Chat Replay excitement analysis (immune to YouTube copyright music & caption blocks)
-            logger.info(f"Subtitles unavailable or restricted for {url}. Falling back to Live Chat excitement analysis...")
+            # Step 2: Fallback to Live Chat Replay & Community timestamp analysis
+            logger.info(f"Subtitles unavailable or restricted for {url}. Falling back to Live Chat & Community highlights...")
             job["progress"]["percent"] = 40
-            chat_path = await asyncio.to_thread(fetch_stream_live_chat, url, temp_dir)
-            if not chat_path or not chat_path.exists():
+
+            # Concurrently fetch community timestamp comments and live chat replay fragments
+            community_task = asyncio.to_thread(fetch_stream_community_highlights, url, temp_dir)
+            chat_task = asyncio.to_thread(fetch_stream_live_chat, url, temp_dir)
+            community_peaks, chat_path = await asyncio.gather(community_task, chat_task)
+
+            chat_peaks = []
+            if chat_path and chat_path.exists():
+                chat_peaks = await asyncio.to_thread(
+                    parse_live_chat_excitement,
+                    chat_path,
+                    35,
+                    params.get("max_moments", 15),
+                    180,
+                )
+
+            all_candidates = (community_peaks or []) + (chat_peaks or [])
+            if not all_candidates:
                 raise RuntimeError(
                     "YouTube has restricted auto-captions and live chat replay on this stream (GTA 6 copyright/age policy). "
                     "Tip: You can switch to the 'Gemini 3.8 Flash (Direct Video)' engine to analyze recorded clips visually, "
                     "or provide a YouTube cookies.txt file to unlock restricted streams."
                 )
 
-            job["progress"]["percent"] = 65
-            peaks = await asyncio.to_thread(
-                parse_live_chat_excitement,
-                chat_path,
-                window_sec=35,
-                top_k=params.get("max_moments", 15),
-            )
-            if not peaks:
-                raise RuntimeError("No significant chat activity or excitement spikes were found in this stream.")
+            # Deduplicate and space candidates across the stream (minimum 120s separation)
+            all_candidates.sort(key=lambda x: x["start_sec"])
+            spaced_candidates = []
+            for c in all_candidates:
+                if not any(abs(c["start_sec"] - s["start_sec"]) < 120 for s in spaced_candidates):
+                    spaced_candidates.append(c)
 
-            job["progress"]["percent"] = 85
+            job["progress"]["percent"] = 80
             moments = await asyncio.to_thread(
                 analyse_chat_spikes_openrouter,
                 api_key,
-                peaks,
+                spaced_candidates,
                 max_moments=params.get("max_moments", 15),
                 style_hint=params.get("style_hint"),
             )

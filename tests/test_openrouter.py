@@ -232,5 +232,30 @@ class TestOpenRouter(unittest.TestCase):
                 self.assertIn("--cookies", cookie_args)
 
 
+    @patch("subprocess.run")
+    def test_fetch_stream_community_highlights(self, mock_run):
+        """fetch_stream_community_highlights should extract timestamps from comments, chapters, and description."""
+        from gta6_clipper.openrouter import fetch_stream_community_highlights
+        mock_stdout = json.dumps({
+            "comments": [
+                {"author": "cory", "text": "1:17:06 im crying bro 😭😭😭😭"},
+                {"author": "boss", "text": "4:00:53 and 4:03:57 are my favorite parts"}
+            ],
+            "chapters": [
+                {"start_time": 5400, "title": "Lucia Car Chase"}
+            ],
+            "description": "02:30:00 Final Heist Shootout\nEnjoy the stream!"
+        })
+        mock_run.return_value = unittest.mock.MagicMock(returncode=0, stdout=mock_stdout)
+
+        candidates = fetch_stream_community_highlights("https://www.youtube.com/watch?v=sample")
+        self.assertGreaterEqual(len(candidates), 4)
+        secs = [c["start_sec"] for c in candidates]
+        self.assertIn(4626.0, secs)  # 1:17:06
+        self.assertIn(14453.0, secs) # 4:00:53
+        self.assertIn(5400.0, secs)  # 1:30:00 (chapter)
+        self.assertIn(9000.0, secs)  # 2:30:00 (desc)
+
+
 if __name__ == "__main__":
     unittest.main()
