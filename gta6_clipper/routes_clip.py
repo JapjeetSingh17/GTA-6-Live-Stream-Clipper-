@@ -6,7 +6,7 @@ import time
 from typing import Literal, Optional
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from gta6_clipper.extractor import (
@@ -207,4 +207,89 @@ async def clip_trim(body: TrimClipRequest):
         "warnings": []
     }
     CLIP_CACHE[candidate_name] = clip_info
+    return {"status": "ok", "clip": clip_info}
+
+
+@router.post("/api/clip/upload")
+async def clip_upload(file: UploadFile = File(...)):
+    import re
+    from gta6_clipper.app import CLIPS_DIR, CLIP_CACHE
+
+    if not file.filename or not file.filename.lower().endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="Only .mp4 video files are accepted")
+
+    clean_name = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", file.filename)
+    if not clean_name.lower().endswith(".mp4"):
+        clean_name += ".mp4"
+
+    unique_name = f"upload_{int(time.time())}_{clean_name}"
+    target_path = CLIPS_DIR / unique_name
+
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    with open(target_path, "wb") as f:
+        f.write(content)
+
+    real_dur = get_media_duration(target_path)
+    file_size = len(content)
+
+    clip_info = {
+        "filename": unique_name,
+        "streamer_id": "upload",
+        "title": f"Upload: {file.filename}",
+        "url": f"/clips/{unique_name}",
+        "size_bytes": file_size,
+        "duration_sec": round(real_dur, 2),
+        "cut_time_sec": 0.0,
+        "created_at": datetime.now().isoformat(),
+        "warning": None,
+        "warnings": []
+    }
+    CLIP_CACHE[unique_name] = clip_info
+    return {"status": "ok", "clip": clip_info}
+
+
+@router.post("/api/clip/sample")
+async def create_sample_clip():
+    import shutil
+    import subprocess
+    from gta6_clipper.app import CLIPS_DIR, CLIP_CACHE
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise HTTPException(status_code=500, detail="FFmpeg is not installed on this server")
+
+    unique_name = f"sample_demo_{int(time.time())}.mp4"
+    target_path = CLIPS_DIR / unique_name
+
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=30:size=640x360:rate=30",
+        "-f", "lavfi", "-i", "sine=frequency=1000:duration=30",
+        "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        str(target_path)
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if res.returncode != 0:
+        raise HTTPException(status_code=500, detail="Failed to synthesize test clip")
+
+    real_dur = get_media_duration(target_path)
+    file_size = target_path.stat().st_size if target_path.exists() else 0
+
+    clip_info = {
+        "filename": unique_name,
+        "streamer_id": "sample",
+        "title": "GTA6 Sample Test Clip (30s)",
+        "url": f"/clips/{unique_name}",
+        "size_bytes": file_size,
+        "duration_sec": round(real_dur, 2),
+        "cut_time_sec": 0.0,
+        "created_at": datetime.now().isoformat(),
+        "warning": None,
+        "warnings": []
+    }
+    CLIP_CACHE[unique_name] = clip_info
     return {"status": "ok", "clip": clip_info}

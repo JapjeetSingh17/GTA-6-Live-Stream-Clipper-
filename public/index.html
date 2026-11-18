@@ -592,10 +592,17 @@
     
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
       <div>
-        <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Select Recorded Clip</label>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <label style="font-size: 0.75rem; color: #94a3b8;">Select Recorded Clip</label>
+          <div style="display: flex; gap: 6px;">
+            <button type="button" class="btn-clip" style="padding: 1px 7px; font-size: 0.7rem;" onclick="document.getElementById('clip-upload-input').click()" title="Upload an MP4 from your Mac">📁 Upload MP4</button>
+            <button type="button" class="btn-clip" style="padding: 1px 7px; font-size: 0.7rem;" onclick="generateSampleDemoClip(this)" title="Create a 30s test clip instantly">🎬 Test Clip</button>
+          </div>
+        </div>
         <select id="top-moments-clip-select" onchange="onTopMomentsClipChange()" style="width: 100%; padding: 8px 10px; font-size: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);">
-          <option value="">-- Choose a Clip to Analyze --</option>
+          <option value="">-- No clips yet (Extract above, Upload, or Test Clip) --</option>
         </select>
+        <input type="file" id="clip-upload-input" accept="video/mp4" style="display: none;" onchange="handleClipFileUpload(this)">
       </div>
       <div>
         <label style="font-size: 0.75rem; color: #94a3b8; display: block; margin-bottom: 4px;">Style Hint (optional)</label>
@@ -1198,7 +1205,12 @@
         const data = await res.json();
         if (res.ok) {
           showToast(`Extracted clip: ${data.clip.title} (${data.clip.duration_sec}s)`, "success");
-          loadClips();
+          await loadClips();
+          const topSelect = document.getElementById("top-moments-clip-select");
+          if (topSelect && data.clip && data.clip.filename) {
+            topSelect.value = data.clip.filename;
+            onTopMomentsClipChange();
+          }
         } else {
           showToast(data.detail || "Stream extraction failed", "error");
         }
@@ -1592,6 +1604,65 @@
       }
     }
 
+    async function handleClipFileUpload(input) {
+      if (!input.files || input.files.length === 0) return;
+      const file = input.files[0];
+      if (!file.name.toLowerCase().endsWith(".mp4")) {
+        showToast("Only .mp4 video files are supported", "error");
+        return;
+      }
+      showToast(`Uploading ${file.name}...`, "info");
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch("/api/clip/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "ok") {
+          showToast(`Uploaded ${data.clip.title}!`, "success");
+          await loadClips();
+          const topSelect = document.getElementById("top-moments-clip-select");
+          if (topSelect) {
+            topSelect.value = data.clip.filename;
+            onTopMomentsClipChange();
+          }
+        } else {
+          showToast(data.detail || "Failed to upload clip", "error");
+        }
+      } catch (err) {
+        showToast("Error uploading file: " + err.message, "error");
+      } finally {
+        input.value = "";
+      }
+    }
+
+    async function generateSampleDemoClip(btn) {
+      const origText = btn ? btn.textContent : "";
+      if (btn) { btn.disabled = true; btn.textContent = "⏳ Creating..."; }
+      showToast("Synthesizing 30s test video with FFmpeg...", "info");
+      try {
+        const res = await fetch("/api/clip/sample", { method: "POST" });
+        const data = await res.json();
+        if (res.ok && data.status === "ok") {
+          showToast("Sample test clip created!", "success");
+          await loadClips();
+          const topSelect = document.getElementById("top-moments-clip-select");
+          if (topSelect) {
+            topSelect.value = data.clip.filename;
+            onTopMomentsClipChange();
+          }
+        } else {
+          showToast(data.detail || "Failed to create sample clip", "error");
+        }
+      } catch (err) {
+        showToast("Error creating sample clip: " + err.message, "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = origText; }
+      }
+    }
+
     async function onTopMomentsClipChange() {
       const select = document.getElementById("top-moments-clip-select");
       const estEl = document.getElementById("top-moments-estimate");
@@ -1790,7 +1861,9 @@
         const topSelect = document.getElementById("top-moments-clip-select");
         if (topSelect) {
           const currentVal = topSelect.value;
-          topSelect.innerHTML = '<option value="">-- Choose a Clip to Analyze --</option>';
+          topSelect.innerHTML = (clips && clips.length > 0)
+            ? '<option value="">-- Choose a Clip to Analyze --</option>'
+            : '<option value="">-- No clips yet (Extract above, Upload MP4, or Test Clip) --</option>';
           clips.forEach(c => {
             const opt = document.createElement("option");
             opt.value = c.filename;

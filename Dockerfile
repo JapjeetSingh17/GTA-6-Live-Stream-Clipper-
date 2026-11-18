@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yt-dlp and Python dependencies
-RUN pip install --no-cache-dir fastapi uvicorn pydantic yt-dlp google-genai
+RUN pip install --no-cache-dir fastapi uvicorn pydantic yt-dlp google-genai python-multipart
 
 WORKDIR /app
 
