@@ -224,7 +224,7 @@ class TestOpenRouter(unittest.TestCase):
         """get_cookie_args should return extractor args by default and cookies when configured."""
         args_default = get_cookie_args()
         self.assertIn("--extractor-args", args_default)
-        self.assertIn("youtube:player_client=android,web", args_default)
+        self.assertIn("youtube:player_client=ios,android,web", args_default)
 
         # Test with YOUTUBE_COOKIES
         import tempfile

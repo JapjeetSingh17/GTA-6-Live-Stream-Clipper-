@@ -35,20 +35,24 @@ def get_cookie_args(temp_dir: Optional[Path] = None) -> List[str]:
     Return yt-dlp arguments for authentication if cookies are available.
     Supports local cookies.txt in workspace root or YOUTUBE_COOKIES environment variable.
     """
+    args = ["--force-ipv4"]
     cwd_cookie = Path.cwd() / "cookies.txt"
     if cwd_cookie.exists():
-        return ["--cookies", str(cwd_cookie), "--extractor-args", "youtube:player_client=android,web"]
+        args.extend(["--cookies", str(cwd_cookie)])
+        return args
 
     env_cookies = os.getenv("YOUTUBE_COOKIES", "").strip()
     if env_cookies and temp_dir:
         c_path = temp_dir / "yt_cookies.txt"
         try:
             c_path.write_text(env_cookies, encoding="utf-8")
-            return ["--cookies", str(c_path), "--extractor-args", "youtube:player_client=android,web"]
+            args.extend(["--cookies", str(c_path)])
+            return args
         except Exception:
             pass
 
-    return ["--extractor-args", "youtube:player_client=android,web"]
+    args.extend(["--extractor-args", "youtube:player_client=ios,android,web"])
+    return args
 
 
 def get_openrouter_api_key() -> Optional[str]:
@@ -87,13 +91,14 @@ def fetch_stream_transcript(url: str, temp_dir: Path) -> Optional[Path]:
     ]
 
     try:
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+        if proc.returncode != 0 and proc.stderr:
+            logger.info(f"yt-dlp subtitle info: {proc.stderr[:200]}")
     except subprocess.TimeoutExpired:
         raise TimeoutError("Timed out extracting stream subtitles")
     except Exception as e:
         logger.warning(f"Error executing yt-dlp subtitle extraction: {e}")
 
-    # Locate generated .vtt or .srt file
     candidates = list(temp_dir.glob("*.vtt")) + list(temp_dir.glob("*.srt"))
     if candidates:
         return candidates[0]
@@ -125,14 +130,17 @@ def fetch_stream_live_chat(url: str, temp_dir: Path, timeout_sec: int = 45) -> O
     ]
 
     try:
-        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_sec)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_sec)
+        if proc.returncode != 0 and proc.stderr:
+            logger.warning(f"yt-dlp live chat returned {proc.returncode}: {proc.stderr[:300]}")
     except subprocess.TimeoutExpired:
-        logger.info(f"Live chat extraction completed sample after {timeout_sec}s")
+        logger.info(f"Live chat extraction sample completed after {timeout_sec}s")
     except Exception as e:
         logger.warning(f"Live chat extraction error: {e}")
 
-    chat_candidates = list(temp_dir.glob("*.live_chat.json")) + list(temp_dir.glob("*.live_chat.json.part"))
+    chat_candidates = list(temp_dir.glob("*live_chat*"))
     if chat_candidates:
+        chat_candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
         return chat_candidates[0]
 
     return None
@@ -144,7 +152,7 @@ def parse_live_chat_excitement(
     top_k: int = 15,
 ) -> List[Dict]:
     """
-    Parse a YouTube .live_chat.json file, aggregate viewer chat velocity & hype words
+    Parse YouTube .live_chat.json files, aggregate viewer chat velocity & hype words
     into time windows, and return the top excitement peak moments with sample chat reactions.
     """
     if not chat_path.exists():
@@ -152,58 +160,66 @@ def parse_live_chat_excitement(
 
     buckets: Dict[int, Dict] = {}
 
-    try:
-        with open(chat_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                try:
-                    data = json.loads(line_str)
-                except Exception:
-                    continue
+    # Read the main chat file or any downloaded fragments in the directory
+    files_to_read = [chat_path]
+    if chat_path.parent.exists():
+        all_chats = list(chat_path.parent.glob("*live_chat*"))
+        if all_chats:
+            files_to_read = all_chats
 
-                action = data.get("replayChatItemAction", {})
-                offset_str = action.get("videoOffsetTimeMsec", "0")
-                try:
-                    offset_msec = int(offset_str)
-                except (ValueError, TypeError):
-                    continue
+    for fpath in files_to_read:
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line_str = line.strip()
+                    if not line_str:
+                        continue
+                    try:
+                        data = json.loads(line_str)
+                    except Exception:
+                        continue
 
-                sec = max(0, offset_msec // 1000)
-                b_idx = sec // window_sec
+                    action = data.get("replayChatItemAction", {})
+                    offset_str = action.get("videoOffsetTimeMsec", "0")
+                    try:
+                        offset_msec = int(offset_str)
+                    except (ValueError, TypeError):
+                        continue
 
-                text_runs = []
-                for act in action.get("actions", []):
-                    for key in ("addChatItemAction", "addLiveChatTickerItemAction"):
-                        item = act.get(key, {}).get("item", {})
-                        msg_renderer = (
-                            item.get("liveChatTextMessageRenderer")
-                            or item.get("liveChatPaidMessageRenderer")
-                            or item.get("liveChatMembershipItemRenderer")
-                        )
-                        if msg_renderer:
-                            runs = msg_renderer.get("message", {}).get("runs", [])
-                            text = "".join(r.get("text", "") for r in runs if isinstance(r, dict))
-                            author = msg_renderer.get("authorName", {}).get("simpleText", "viewer")
-                            if text:
-                                text_runs.append((author, text.strip()))
+                    sec = max(0, offset_msec // 1000)
+                    b_idx = sec // window_sec
 
-                if not text_runs:
-                    continue
+                    text_runs = []
+                    for act in action.get("actions", []):
+                        for key in ("addChatItemAction", "addLiveChatTickerItemAction"):
+                            item = act.get(key, {}).get("item", {})
+                            msg_renderer = (
+                                item.get("liveChatTextMessageRenderer")
+                                or item.get("liveChatPaidMessageRenderer")
+                                or item.get("liveChatMembershipItemRenderer")
+                            )
+                            if msg_renderer:
+                                runs = msg_renderer.get("message", {}).get("runs", [])
+                                text = "".join(r.get("text", "") for r in runs if isinstance(r, dict))
+                                author = msg_renderer.get("authorName", {}).get("simpleText", "viewer")
+                                if text:
+                                    text_runs.append((author, text.strip()))
 
-                if b_idx not in buckets:
-                    buckets[b_idx] = {"msgs": 0, "hype": 0, "samples": []}
+                    if not text_runs:
+                        continue
 
-                for author, text in text_runs:
-                    buckets[b_idx]["msgs"] += 1
-                    hype_matches = len(HYPE_PATTERN.findall(text))
-                    buckets[b_idx]["hype"] += hype_matches
-                    if len(buckets[b_idx]["samples"]) < 6 and len(text) > 2:
-                        buckets[b_idx]["samples"].append(f"@{author}: {text}")
+                    if b_idx not in buckets:
+                        buckets[b_idx] = {"msgs": 0, "hype": 0, "samples": []}
 
-    except Exception as e:
-        logger.warning(f"Error reading live chat JSON: {e}")
+                    for author, text in text_runs:
+                        buckets[b_idx]["msgs"] += 1
+                        hype_matches = len(HYPE_PATTERN.findall(text))
+                        buckets[b_idx]["hype"] += hype_matches
+                        if len(buckets[b_idx]["samples"]) < 6 and len(text) > 2:
+                            buckets[b_idx]["samples"].append(f"@{author}: {text}")
+
+        except Exception as e:
+            logger.warning(f"Error reading live chat file {fpath.name}: {e}")
 
     if not buckets:
         return []

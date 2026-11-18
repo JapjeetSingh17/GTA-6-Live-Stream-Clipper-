@@ -1,10 +1,11 @@
 FROM python:3.11-slim
 
-# Install system binaries: ffmpeg, streamlink, curl
+# Install system binaries: ffmpeg, streamlink, curl, nodejs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     streamlink \
     curl \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yt-dlp and Python dependencies
