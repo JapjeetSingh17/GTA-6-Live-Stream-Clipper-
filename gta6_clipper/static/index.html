@@ -993,9 +993,19 @@
     }
 
     function copyTitle(title) {
+      if (!title) return;
       navigator.clipboard.writeText(title).then(() => {
         showToast("Title copied to clipboard", "info");
+      }).catch(() => {
+        showToast("Failed to copy title", "error");
       });
+    }
+
+    function copyClipTitle(btn) {
+      const card = btn.closest('.clip-card');
+      const titleEl = card ? card.querySelector('.clip-title') : null;
+      const title = titleEl ? (titleEl.getAttribute('title') || titleEl.textContent) : "";
+      copyTitle(title);
     }
 
     // --- Status Poller & Non-Destructive DOM Updater ---
@@ -1459,6 +1469,7 @@
 
       countEl.textContent = `Found ${moments.length} Highlights`;
       resultsBox.dataset.moments = JSON.stringify(moments);
+      window[`MOMENTS_${safeId}`] = moments;
 
       if (moments.length === 0) {
         listEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.75rem;">No highlight moments met the criteria.</div>';
@@ -1466,15 +1477,17 @@
         listEl.innerHTML = moments.map((m, idx) => {
           const isHigh = m.score >= 8;
           const scoreColor = isHigh ? "var(--neon-green)" : "var(--neon-yellow)";
+          const safeTitle = (m.title || "Clip Highlight").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const safeReason = (m.reason || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
           return `
             <div style="background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 4px; padding: 6px 8px; font-size: 0.75rem;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                <span style="font-weight: 600; color: #f1f5f9;">#${idx+1} ${m.title}</span>
+                <span style="font-weight: 600; color: #f1f5f9;">#${idx+1} ${safeTitle}</span>
                 <span style="color: ${scoreColor}; font-weight: 700; font-size: 0.7rem; border: 1px solid ${scoreColor}; padding: 1px 4px; border-radius: 3px;">
                   ★ ${m.score}/10
                 </span>
               </div>
-              <div style="color: #94a3b8; font-size: 0.7rem; margin-bottom: 4px;">${m.reason || ""}</div>
+              <div style="color: #94a3b8; font-size: 0.7rem; margin-bottom: 4px;">${safeReason}</div>
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
                 <span style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.7rem;">
                   ${m.start} → ${m.end} (${m.duration_sec}s)
@@ -1482,7 +1495,7 @@
                 <div style="display: flex; gap: 4px;">
                   <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.68rem;" onclick="seekVideo('${safeId}', ${m.start_sec})">▶ Preview</button>
                   <button type="button" class="btn-secondary" style="padding: 2px 6px; font-size: 0.68rem;" onclick="useInTrimmer('${filename}', ${m.start_sec}, ${m.end_sec})">✂ Use In Trimmer</button>
-                  <button type="button" class="btn-clip" style="padding: 2px 6px; font-size: 0.68rem;" onclick="cutSingleMoment('${filename}', ${m.start_sec}, ${m.end_sec}, '${m.title.replace(/'/g, "\\'")}', this)">⚡ Cut</button>
+                  <button type="button" class="btn-clip" style="padding: 2px 6px; font-size: 0.68rem;" onclick="cutDrawerMomentByIndex('${safeId}', '${filename.replace(/'/g, "\\'")}', ${idx}, this)">⚡ Cut</button>
                 </div>
               </div>
             </div>
@@ -1490,6 +1503,16 @@
         }).join("");
       }
       resultsBox.style.display = "block";
+    }
+
+    function cutDrawerMomentByIndex(safeId, filename, idx, btn) {
+      const list = window[`MOMENTS_${safeId}`];
+      const m = (list && list[idx]) ? list[idx] : null;
+      if (!m) {
+        showToast("Moment not found", "error");
+        return;
+      }
+      cutSingleMoment(filename, m.start_sec, m.end_sec, m.title, btn);
     }
 
     function seekVideo(safeId, startSec) {
@@ -1841,59 +1864,84 @@
       showToast("Analysis cancelled", "info");
     }
 
-    async function cutOrExtractMoment(startSec, endSec, startHms, endHms, title, btn) {
+    async function cutMomentByIndex(idx, btn) {
+      const m = (window.CURRENT_TOP_MOMENTS && window.CURRENT_TOP_MOMENTS[idx]) ? window.CURRENT_TOP_MOMENTS[idx] : null;
+      if (!m) {
+        showToast("Highlight moment data not found", "error");
+        return;
+      }
+      const source = window.CURRENT_TOP_MOMENTS_SOURCE || {};
       const urlInput = document.getElementById("top-moments-url");
       const select = document.getElementById("top-moments-clip-select");
-      const streamUrl = urlInput ? urlInput.value.trim() : "";
-      const filename = select ? select.value : "";
+      const streamUrl = (urlInput && urlInput.value.trim()) || source.streamUrl || "";
+      const filename = (select && select.value) || source.filename || "";
+
+      if (filename) {
+        cutSingleMoment(filename, m.start_sec, m.end_sec, m.title, btn);
+      } else if (streamUrl) {
+        await executeMomentExtraction(streamUrl, m.start, m.end, m.title, btn);
+      } else {
+        showToast("Please choose a clip or stream URL", "error");
+      }
+    }
+
+    async function cutOrExtractMoment(startSec, endSec, startHms, endHms, title, btn) {
+      const source = window.CURRENT_TOP_MOMENTS_SOURCE || {};
+      const urlInput = document.getElementById("top-moments-url");
+      const select = document.getElementById("top-moments-clip-select");
+      const streamUrl = (urlInput && urlInput.value.trim()) || source.streamUrl || "";
+      const filename = (select && select.value) || source.filename || "";
 
       if (filename) {
         cutSingleMoment(filename, startSec, endSec, title, btn);
       } else if (streamUrl) {
-        // Pre-fill extractor inputs for visibility
-        const extUrl = document.getElementById("extractor-url");
-        const extStart = document.getElementById("extractor-start");
-        const extEnd = document.getElementById("extractor-end");
-        const extTitle = document.getElementById("extractor-title");
-        if (extUrl) extUrl.value = streamUrl;
-        if (extStart) extStart.value = startHms;
-        if (extEnd) extEnd.value = endHms;
-        if (extTitle) extTitle.value = title;
-
-        const origText = btn.textContent;
-        btn.textContent = "⏳ Cutting Clip...";
-        btn.disabled = true;
-
-        try {
-          showToast(`Extracting highlight: "${title}" (${startHms} - ${endHms})...`, "info");
-          const payload = {
-            url: streamUrl,
-            start_time: startHms,
-            end_time: endHms,
-            title: title || "Stream Highlight"
-          };
-          const res = await fetch("/api/clip/extract", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-          const data = await res.json();
-          if (res.ok && data.clip) {
-            showToast(`✅ Extracted: "${data.clip.title}"! Scroll down to Recorded Clips to play or download.`, "success");
-            await loadClips();
-            const clipsContainer = document.getElementById("clips-container");
-            if (clipsContainer) clipsContainer.scrollIntoView({ behavior: "smooth" });
-          } else {
-            showToast(data.detail || "Clip extraction failed", "error");
-          }
-        } catch (err) {
-          showToast("Network error during clip extraction", "error");
-        } finally {
-          btn.textContent = origText;
-          btn.disabled = false;
-        }
+        await executeMomentExtraction(streamUrl, startHms, endHms, title, btn);
       } else {
         showToast("Please choose a clip or stream URL", "error");
+      }
+    }
+
+    async function executeMomentExtraction(streamUrl, startHms, endHms, title, btn) {
+      const extUrl = document.getElementById("extractor-url");
+      const extStart = document.getElementById("extractor-start");
+      const extEnd = document.getElementById("extractor-end");
+      const extTitle = document.getElementById("extractor-title");
+      if (extUrl) extUrl.value = streamUrl;
+      if (extStart) extStart.value = startHms;
+      if (extEnd) extEnd.value = endHms;
+      if (extTitle) extTitle.value = title;
+
+      const origText = btn.textContent;
+      btn.textContent = "⏳ Cutting Clip...";
+      btn.disabled = true;
+
+      try {
+        showToast(`Extracting highlight: "${title}" (${startHms} - ${endHms})...`, "info");
+        const payload = {
+          url: streamUrl,
+          start_time: startHms,
+          end_time: endHms,
+          title: title || "Stream Highlight"
+        };
+        const res = await fetch("/api/clip/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok && data.clip) {
+          showToast(`✅ Extracted: "${data.clip.title}"! Scroll down to Recorded Clips to play or download.`, "success");
+          await loadClips();
+          const clipsContainer = document.getElementById("clips-container");
+          if (clipsContainer) clipsContainer.scrollIntoView({ behavior: "smooth" });
+        } else {
+          showToast(data.detail || "Clip extraction failed", "error");
+        }
+      } catch (err) {
+        showToast("Network error during clip extraction", "error");
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
       }
     }
 
@@ -1903,11 +1951,18 @@
       const listEl = document.getElementById("top-moments-list");
       const select = document.getElementById("top-moments-clip-select");
       const urlInput = document.getElementById("top-moments-url");
-      const filename = (select && select.value) ? select.value : (urlInput ? urlInput.value : "");
+      const streamUrl = (urlInput && urlInput.value) ? urlInput.value.trim() : "";
+      const filename = (select && select.value) ? select.value : "";
+      const targetLabel = filename || streamUrl || "stream";
 
       if (!resultsBox || !listEl) return;
-      countEl.textContent = `Found ${moments.length} Highlights for ${filename}`;
+      countEl.textContent = `Found ${moments.length} Highlights for ${targetLabel}`;
       resultsBox.dataset.moments = JSON.stringify(moments);
+      window.CURRENT_TOP_MOMENTS = moments;
+      window.CURRENT_TOP_MOMENTS_SOURCE = {
+        streamUrl: streamUrl,
+        filename: filename
+      };
 
       if (moments.length === 0) {
         listEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.8rem; padding: 10px;">No highlight moments met the criteria.</div>';
@@ -1919,23 +1974,26 @@
             ? '<span style="font-size: 0.65rem; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); padding: 1px 6px; border-radius: 4px; margin-left: 6px;">💬 Chat Hype</span>'
             : '<span style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 1px 6px; border-radius: 4px; margin-left: 6px;">📝 Captions</span>';
 
+          const safeTitle = (m.title || "Stream Highlight").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          const safeReason = (m.reason || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
           return `
             <div style="background: #0f1b2d; border: 1px solid #1e3a5f; border-radius: 6px; padding: 8px 12px; font-size: 0.8rem;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                 <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-                  <span style="font-weight: 700; color: #f1f5f9;">#${idx+1} ${m.title}</span>
+                  <span style="font-weight: 700; color: #f1f5f9;">#${idx+1} ${safeTitle}</span>
                   ${sourceBadge}
                 </div>
                 <span style="color: ${scoreColor}; font-weight: 700; font-size: 0.75rem; border: 1px solid ${scoreColor}; padding: 2px 6px; border-radius: 4px;">
                   ★ ${m.score}/10
                 </span>
               </div>
-              <div style="color: #94a3b8; font-size: 0.75rem; margin-bottom: 6px;">${m.reason || ""}</div>
+              <div style="color: #94a3b8; font-size: 0.75rem; margin-bottom: 6px;">${safeReason}</div>
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
                 <span style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.75rem;">
                   ${m.start} → ${m.end} (${m.duration_sec}s)
                 </span>
-                <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="cutOrExtractMoment(${m.start_sec}, ${m.end_sec}, '${m.start}', '${m.end}', '${m.title.replace(/'/g, "\\'")}', this)">⚡ Cut / Extract Moment</button>
+                <button type="button" class="btn-clip" style="padding: 3px 10px; font-size: 0.72rem;" onclick="cutMomentByIndex(${idx}, this)">⚡ Cut / Extract Moment</button>
               </div>
             </div>
           `;
@@ -2002,7 +2060,7 @@
               </div>
               <div class="clip-actions">
                 <a href="${c.url}" download="${c.filename}" class="btn-secondary">⬇ Save</a>
-                <button type="button" class="btn-secondary" onclick="copyTitle('${c.title.replace(/'/g, "\\'")}')">📋 Copy</button>
+                <button type="button" class="btn-secondary" onclick="copyClipTitle(this)">📋 Copy</button>
                 <button type="button" class="btn-secondary" onclick="revealInFinder('${c.filename}')">🔍 Reveal</button>
                 <button type="button" class="btn-secondary" onclick="toggleTrimDrawer('${c.filename}')">✂ Trim</button>
                 <button type="button" class="btn-secondary" style="border-color: var(--neon-cyan); color: var(--neon-cyan);" onclick="openMomentsDrawer('${c.filename}')">✨ Moments</button>
